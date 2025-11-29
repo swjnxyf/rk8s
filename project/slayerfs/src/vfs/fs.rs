@@ -9,17 +9,28 @@ use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, MetaStore};
 use dashmap::{DashMap, Entry};
+use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tracing::info;
 
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
 use crate::vfs::handles::{FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::FileRegistry;
+
+/// Maximum entries to return per readdir/readdirplus call
+const MAX_READDIR_ENTRIES: usize = 50;
+
+/// Directory listing cache entry
+#[derive(Clone)]
+struct DirListingCache {
+    entries: Arc<Vec<DirEntry>>,
+}
 
 struct HandleRegistry {
     handles: DashMap<i64, Vec<FileHandle>>,
@@ -159,6 +170,8 @@ where
     handles: HandleRegistry,
     files: FileRegistry<S, M>,
     modified: ModifiedTracker,
+    /// Short-lived cache for directory listings to support paginated readdir
+    dirlist_cache: Cache<i64, DirListingCache>,
 }
 
 impl<S, M> VfsState<S, M>
@@ -171,6 +184,11 @@ where
             handles: HandleRegistry::new(),
             files: FileRegistry::new(),
             modified: ModifiedTracker::new(),
+            // Cache directory listings for 5 seconds (enough for ls command)
+            dirlist_cache: Cache::builder()
+                .max_capacity(1000)
+                .time_to_live(Duration::from_secs(5))
+                .build(),
         }
     }
 }
@@ -343,15 +361,41 @@ where
     pub async fn readdir_ino(&self, ino: i64) -> Option<Vec<DirEntry>> {
         let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
 
-        let entries: Vec<DirEntry> = meta_entries
-            .into_iter()
-            .map(|e| DirEntry {
-                name: e.name,
-                ino: e.ino,
-                kind: e.kind,
-            })
-            .collect();
-        Some(entries)
+        Some(meta_entries)
+    }
+
+    /// List directory entries with offset support and caching.
+    /// Returns up to MAX_READDIR_ENTRIES starting from the given offset.
+    /// The returned entries are a slice of the full cached directory listing.
+    pub async fn readdir_with_offset(&self, ino: i64, offset: u64) -> Option<Vec<DirEntry>> {
+        // Try to get from cache first
+        let cached = if let Some(cache_entry) = self.state.dirlist_cache.get(&ino).await {
+            info!("use cache: offset is {}", offset);
+            cache_entry.entries.clone()
+        } else {
+            // Cache miss - fetch from meta layer
+            let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
+            let entries_arc = Arc::new(meta_entries);
+            // Store in cache
+            self.state
+                .dirlist_cache
+                .insert(
+                    ino,
+                    DirListingCache {
+                        entries: Arc::clone(&entries_arc),
+                    },
+                )
+                .await;
+            entries_arc
+        };
+
+        // Return slice based on offset, limited to MAX_READDIR_ENTRIES
+        let start = offset as usize;
+        if start >= cached.len() {
+            return Some(Vec::new());
+        }
+        let end = std::cmp::min(start + MAX_READDIR_ENTRIES, cached.len());
+        Some(cached[start..end].to_vec())
     }
 
     /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.
