@@ -9,32 +9,22 @@ use crate::meta::config::{CacheCapacity, CacheTtl};
 use crate::meta::store::MetaError;
 use crate::meta::{MetaLayer, MetaStore};
 use dashmap::{DashMap, Entry};
-use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use tracing::info;
 
 // Re-export types from meta::store for convenience
 pub use crate::meta::store::{DirEntry, FileAttr, FileType};
-use crate::vfs::handles::{FileHandle, HandleFlags};
+use crate::vfs::handles::{DirHandle, FileHandle, HandleFlags};
 use crate::vfs::inode::Inode;
 use crate::vfs::io::FileRegistry;
-
-/// Maximum entries to return per readdir/readdirplus call
-const MAX_READDIR_ENTRIES: usize = 50;
-
-/// Directory listing cache entry
-#[derive(Clone)]
-struct DirListingCache {
-    entries: Arc<Vec<DirEntry>>,
-}
 
 struct HandleRegistry {
     handles: DashMap<i64, Vec<FileHandle>>,
     handle_ino: DashMap<u64, i64>,
+    dir_handles: DashMap<u64, Arc<DirHandle>>,
     next_fh: AtomicU64,
 }
 
@@ -43,6 +33,7 @@ impl HandleRegistry {
         Self {
             handles: DashMap::new(),
             handle_ino: DashMap::new(),
+            dir_handles: DashMap::new(),
             next_fh: AtomicU64::new(1),
         }
     }
@@ -67,6 +58,7 @@ impl HandleRegistry {
             if empty {
                 self.handles.remove(&ino);
             }
+            tracing::info!("release file handle: fh={}, ino={}", fh, ino);
             Some(handle)
         } else {
             None
@@ -84,6 +76,22 @@ impl HandleRegistry {
             .get(&ino)
             .map(|entry| entry.iter().map(|h| h.fh).collect())
             .unwrap_or_default()
+    }
+
+    async fn allocate_dir(&self, handle: DirHandle) -> u64 {
+        let fh = self.next_fh.fetch_add(1, Ordering::Relaxed);
+        self.dir_handles.insert(fh, Arc::new(handle));
+        fh
+    }
+
+    async fn release_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+        self.dir_handles.remove(&fh).map(|(_, handle)| handle)
+    }
+
+    async fn get_dir(&self, fh: u64) -> Option<Arc<DirHandle>> {
+        self.dir_handles
+            .get(&fh)
+            .map(|entry| Arc::clone(entry.value()))
     }
 }
 
@@ -170,8 +178,6 @@ where
     handles: HandleRegistry,
     files: FileRegistry<S, M>,
     modified: ModifiedTracker,
-    /// Short-lived cache for directory listings to support paginated readdir
-    dirlist_cache: Cache<i64, DirListingCache>,
 }
 
 impl<S, M> VfsState<S, M>
@@ -184,11 +190,6 @@ where
             handles: HandleRegistry::new(),
             files: FileRegistry::new(),
             modified: ModifiedTracker::new(),
-            // Cache directory listings for 5 seconds (enough for ls command)
-            dirlist_cache: Cache::builder()
-                .max_capacity(1000)
-                .time_to_live(Duration::from_secs(5))
-                .build(),
         }
     }
 }
@@ -364,38 +365,59 @@ where
         Some(meta_entries)
     }
 
-    /// List directory entries with offset support and caching.
-    /// Returns up to MAX_READDIR_ENTRIES starting from the given offset.
-    /// The returned entries are a slice of the full cached directory listing.
-    pub async fn readdir_with_offset(&self, ino: i64, offset: u64) -> Option<Vec<DirEntry>> {
-        // Try to get from cache first
-        let cached = if let Some(cache_entry) = self.state.dirlist_cache.get(&ino).await {
-            info!("use cache: offset is {}", offset);
-            cache_entry.entries.clone()
-        } else {
-            // Cache miss - fetch from meta layer
-            let meta_entries = self.core.meta_layer.readdir(ino).await.ok()?;
-            let entries_arc = Arc::new(meta_entries);
-            // Store in cache
-            self.state
-                .dirlist_cache
-                .insert(
-                    ino,
-                    DirListingCache {
-                        entries: Arc::clone(&entries_arc),
-                    },
-                )
-                .await;
-            entries_arc
-        };
+    /// Open a directory handle for reading. Returns the file handle ID.
+    /// This pre-loads all directory entries to support efficient pagination.
+    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, String> {
+        // Verify directory exists
+        let attr = self
+            .core
+            .meta_layer
+            .stat(ino)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "not found".to_string())?;
 
-        // Return slice based on offset, limited to MAX_READDIR_ENTRIES
-        let start = offset as usize;
-        if start >= cached.len() {
-            return Some(Vec::new());
+        if attr.kind != FileType::Dir {
+            return Err("not a directory".into());
         }
-        let end = std::cmp::min(start + MAX_READDIR_ENTRIES, cached.len());
-        Some(cached[start..end].to_vec())
+
+        // Load all directory entries
+        let entries = self
+            .core
+            .meta_layer
+            .readdir(ino)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Create handle
+        let handle = DirHandle::new(ino, entries);
+        let fh = self.state.handles.allocate_dir(handle).await;
+
+        Ok(fh)
+    }
+
+    /// Close a directory handle
+    pub async fn closedir_handle(&self, fh: u64) -> Result<(), String> {
+        let handle = self
+            .state
+            .handles
+            .release_dir(fh)
+            .await
+            .ok_or_else(|| "invalid handle".to_string())?;
+
+        tracing::info!(
+            "release dir handle: fh={}, ino={}, entries={}",
+            fh,
+            handle.ino,
+            handle.entries.len()
+        );
+        Ok(())
+    }
+
+    /// Read directory entries by handle with pagination
+    pub async fn readdir_by_handle(&self, fh: u64, offset: u64) -> Option<Vec<DirEntry>> {
+        let handle = self.state.handles.get_dir(fh).await?;
+        Some(handle.get_entries(offset))
     }
 
     /// Normalize a path by stripping redundant separators and ensuring it starts with `/`.

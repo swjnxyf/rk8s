@@ -33,6 +33,7 @@ use std::time::{Duration, SystemTime};
 use futures_util::stream::{self, BoxStream};
 use rfuse3::raw::Filesystem;
 use rfuse3::{FileType as FuseFileType, SetAttr, Timestamp};
+
 #[cfg(all(test, target_os = "linux"))]
 mod mount_tests {
     use super::*;
@@ -156,15 +157,17 @@ where
         Ok(ReplyOpen { fh: 0, flags: 0 })
     }
 
-    // Open directory: stateless
+    // Open directory: allocate handle and pre-load entries
     async fn opendir(&self, _req: Request, ino: u64, _flags: u32) -> FuseResult<ReplyOpen> {
-        let Some(attr) = self.stat_ino(ino as i64).await else {
-            return Err(libc::ENOENT.into());
-        };
-        if !matches!(attr.kind, VfsFileType::Dir) {
-            return Err(libc::ENOTDIR.into());
-        }
-        Ok(ReplyOpen { fh: 0, flags: 0 })
+        let fh = self
+            .opendir_handle(ino as i64)
+            .await
+            .map_err(|e| match e.as_str() {
+                "not found" => libc::ENOENT,
+                "not a directory" => libc::ENOTDIR,
+                _ => libc::EIO,
+            })?;
+        Ok(ReplyOpen { fh, flags: 0 })
     }
 
     // Read file: map to VFS::read (path derived from inode)
@@ -276,51 +279,72 @@ where
         &'a self,
         _req: Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
     ) -> FuseResult<ReplyDirectory<BoxStream<'a, FuseResult<DirectoryEntry>>>> {
-        // Validate directory exists
-        if self.stat_ino(ino as i64).await.is_none() {
-            return Err(libc::ENOENT.into());
-        }
-
-        // offset 0 means include special entries (. and ..)
-        // offset > 0 means continue from cached entries
         let mut all: Vec<DirectoryEntry> = Vec::new();
 
-        if offset == 0 {
-            // Add special entries at the start
-            all.push(DirectoryEntry {
-                inode: ino,
-                kind: FuseFileType::Directory,
-                name: OsString::from("."),
-                offset: 1,
-            });
-            let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
-            all.push(DirectoryEntry {
-                inode: parent_ino,
-                kind: FuseFileType::Directory,
-                name: OsString::from(".."),
-                offset: 2,
-            });
-        }
+        // Try to use handle first
+        let entries_from_handle = if fh != 0 {
+            // offset 0-2 are reserved for . and ..
+            if offset == 0 {
+                all.push(DirectoryEntry {
+                    inode: ino,
+                    kind: FuseFileType::Directory,
+                    name: OsString::from("."),
+                    offset: 1,
+                });
+                let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+                all.push(DirectoryEntry {
+                    inode: parent_ino,
+                    kind: FuseFileType::Directory,
+                    name: OsString::from(".."),
+                    offset: 2,
+                });
+            }
 
-        // Calculate offset into actual entries (skip . and .. which occupy offsets 1 and 2)
-        let entries_offset = if offset <= 2 { 0 } else { (offset - 2) as u64 };
+            let entries_offset = if offset <= 2 { 0 } else { (offset - 2) as u64 };
+            self.readdir_by_handle(fh, entries_offset).await
+        } else {
+            None
+        };
 
-        // Fetch paginated entries from VFS cache
-        let entries = match self.readdir_with_offset(ino as i64, entries_offset).await {
-            Some(v) => v,
-            None => {
-                if self.stat_ino(ino as i64).await.is_some() {
-                    return Err(libc::ENOTDIR.into());
-                } else {
-                    return Err(libc::ENOENT.into());
+        // Fallback to stateless mode if handle not found
+        let entries = if let Some(e) = entries_from_handle {
+            e
+        } else {
+            // Fallback: directly read from meta layer
+            match self.readdir_ino(ino as i64).await {
+                Some(v) => {
+                    if offset == 0 {
+                        all.push(DirectoryEntry {
+                            inode: ino,
+                            kind: FuseFileType::Directory,
+                            name: OsString::from("."),
+                            offset: 1,
+                        });
+                        let parent_ino =
+                            self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+                        all.push(DirectoryEntry {
+                            inode: parent_ino,
+                            kind: FuseFileType::Directory,
+                            name: OsString::from(".."),
+                            offset: 2,
+                        });
+                    }
+                    v
+                }
+                None => {
+                    if self.stat_ino(ino as i64).await.is_some() {
+                        return Err(libc::ENOTDIR.into());
+                    } else {
+                        return Err(libc::ENOENT.into());
+                    }
                 }
             }
         };
 
-        // Add children entries with proper offset calculation
+        let entries_offset = if offset <= 2 { 0 } else { (offset - 2) as u64 };
         for (i, e) in entries.iter().enumerate() {
             all.push(DirectoryEntry {
                 inode: e.ino as u64,
@@ -340,68 +364,105 @@ where
         &'a self,
         req: Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: u64,
         _lock_owner: u64,
     ) -> FuseResult<ReplyDirectoryPlus<BoxStream<'a, FuseResult<DirectoryEntryPlus>>>> {
-        // Validate directory exists
-        if self.stat_ino(ino as i64).await.is_none() {
-            return Err(libc::ENOENT.into());
-        }
-
         let ttl = Duration::from_secs(1);
         let mut all: Vec<DirectoryEntryPlus> = Vec::new();
 
-        if offset == 0 {
-            // Add "." entry
-            if let Some(attr) = self.stat_ino(ino as i64).await {
-                let fattr = vfs_to_fuse_attr(&attr, &req);
-                all.push(DirectoryEntryPlus {
-                    inode: ino,
-                    generation: 0,
-                    kind: FuseFileType::Directory,
-                    name: OsString::from("."),
-                    offset: 1,
-                    attr: fattr,
-                    entry_ttl: ttl,
-                    attr_ttl: ttl,
-                });
-            } else {
-                return Err(libc::ENOENT.into());
-            }
-            // Add ".." entry
-            let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
-            if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
-                let f = vfs_to_fuse_attr(&pattr, &req);
-                all.push(DirectoryEntryPlus {
-                    inode: parent_ino,
-                    generation: 0,
-                    kind: FuseFileType::Directory,
-                    name: OsString::from(".."),
-                    offset: 2,
-                    attr: f,
-                    entry_ttl: ttl,
-                    attr_ttl: ttl,
-                });
-            }
-        }
-
-        // Calculate offset into actual entries (skip . and .. which occupy offsets 1 and 2)
-        let entries_offset = offset.saturating_sub(2);
-
-        // Fetch paginated entries from VFS cache
-        let entries = match self.readdir_with_offset(ino as i64, entries_offset).await {
-            Some(v) => v,
-            None => {
-                if self.stat_ino(ino as i64).await.is_some() {
-                    return Err(libc::ENOTDIR.into());
+        // Try to use handle first
+        let entries_from_handle = if fh != 0 {
+            if offset == 0 {
+                // Add "." entry
+                if let Some(attr) = self.stat_ino(ino as i64).await {
+                    let fattr = vfs_to_fuse_attr(&attr, &req);
+                    all.push(DirectoryEntryPlus {
+                        inode: ino,
+                        generation: 0,
+                        kind: FuseFileType::Directory,
+                        name: OsString::from("."),
+                        offset: 1,
+                        attr: fattr,
+                        entry_ttl: ttl,
+                        attr_ttl: ttl,
+                    });
                 } else {
                     return Err(libc::ENOENT.into());
+                }
+                // Add ".." entry
+                let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+                if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
+                    let f = vfs_to_fuse_attr(&pattr, &req);
+                    all.push(DirectoryEntryPlus {
+                        inode: parent_ino,
+                        generation: 0,
+                        kind: FuseFileType::Directory,
+                        name: OsString::from(".."),
+                        offset: 2,
+                        attr: f,
+                        entry_ttl: ttl,
+                        attr_ttl: ttl,
+                    });
+                }
+            }
+
+            let entries_offset = offset.saturating_sub(2);
+            self.readdir_by_handle(fh, entries_offset).await
+        } else {
+            None
+        };
+
+        // Fallback to stateless mode if handle not found
+        let entries = if let Some(e) = entries_from_handle {
+            e
+        } else {
+            // Fallback: directly read from meta layer
+            if offset == 0 {
+                if let Some(attr) = self.stat_ino(ino as i64).await {
+                    let fattr = vfs_to_fuse_attr(&attr, &req);
+                    all.push(DirectoryEntryPlus {
+                        inode: ino,
+                        generation: 0,
+                        kind: FuseFileType::Directory,
+                        name: OsString::from("."),
+                        offset: 1,
+                        attr: fattr,
+                        entry_ttl: ttl,
+                        attr_ttl: ttl,
+                    });
+                } else {
+                    return Err(libc::ENOENT.into());
+                }
+                let parent_ino = self.parent_of(ino as i64).await.unwrap_or(self.root_ino()) as u64;
+                if let Some(pattr) = self.stat_ino(parent_ino as i64).await {
+                    let f = vfs_to_fuse_attr(&pattr, &req);
+                    all.push(DirectoryEntryPlus {
+                        inode: parent_ino,
+                        generation: 0,
+                        kind: FuseFileType::Directory,
+                        name: OsString::from(".."),
+                        offset: 2,
+                        attr: f,
+                        entry_ttl: ttl,
+                        attr_ttl: ttl,
+                    });
+                }
+            }
+
+            match self.readdir_ino(ino as i64).await {
+                Some(v) => v,
+                None => {
+                    if self.stat_ino(ino as i64).await.is_some() {
+                        return Err(libc::ENOTDIR.into());
+                    } else {
+                        return Err(libc::ENOENT.into());
+                    }
                 }
             }
         };
 
-        // Add children entries with attributes
+        let entries_offset = offset.saturating_sub(2);
         for (i, e) in entries.iter().enumerate() {
             let Some(cattr) = self.stat_ino(e.ino).await else {
                 continue;
@@ -811,13 +872,10 @@ where
     }
 
     // Close directory handle
-    async fn releasedir(
-        &self,
-        _req: Request,
-        _inode: u64,
-        _fh: u64,
-        _flags: u32,
-    ) -> FuseResult<()> {
+    async fn releasedir(&self, _req: Request, _inode: u64, fh: u64, _flags: u32) -> FuseResult<()> {
+        if fh != 0 {
+            self.closedir_handle(fh).await.ok();
+        }
         Ok(())
     }
 
