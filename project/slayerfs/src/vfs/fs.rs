@@ -367,27 +367,21 @@ where
 
     /// Open a directory handle for reading. Returns the file handle ID.
     /// This pre-loads all directory entries to support efficient pagination.
-    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, String> {
+    pub async fn opendir_handle(&self, ino: i64) -> Result<u64, MetaError> {
         // Verify directory exists
         let attr = self
             .core
             .meta_layer
             .stat(ino)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "not found".to_string())?;
+            .await?
+            .ok_or(MetaError::NotFound(ino))?;
 
         if attr.kind != FileType::Dir {
-            return Err("not a directory".into());
+            return Err(MetaError::NotDirectory(ino));
         }
 
         // Load all directory entries
-        let entries = self
-            .core
-            .meta_layer
-            .readdir(ino)
-            .await
-            .map_err(|e| e.to_string())?;
+        let entries = self.core.meta_layer.readdir(ino).await?;
 
         // Create handle
         let handle = DirHandle::new(ino, entries);
@@ -397,13 +391,13 @@ where
     }
 
     /// Close a directory handle
-    pub async fn closedir_handle(&self, fh: u64) -> Result<(), String> {
+    pub async fn closedir_handle(&self, fh: u64) -> Result<(), MetaError> {
         let handle = self
             .state
             .handles
             .release_dir(fh)
             .await
-            .ok_or_else(|| "invalid handle".to_string())?;
+            .ok_or(MetaError::InvalidHandle(fh))?;
 
         tracing::info!(
             "release dir handle: fh={}, ino={}, entries={}",

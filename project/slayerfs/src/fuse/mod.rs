@@ -159,14 +159,11 @@ where
 
     // Open directory: allocate handle and pre-load entries
     async fn opendir(&self, _req: Request, ino: u64, _flags: u32) -> FuseResult<ReplyOpen> {
-        let fh = self
-            .opendir_handle(ino as i64)
-            .await
-            .map_err(|e| match e.as_str() {
-                "not found" => libc::ENOENT,
-                "not a directory" => libc::ENOTDIR,
-                _ => libc::EIO,
-            })?;
+        let fh = self.opendir_handle(ino as i64).await.map_err(|e| match e {
+            MetaError::NotFound(_) => libc::ENOENT,
+            MetaError::NotDirectory(_) => libc::ENOTDIR,
+            _ => libc::EIO,
+        })?;
         Ok(ReplyOpen { fh, flags: 0 })
     }
 
