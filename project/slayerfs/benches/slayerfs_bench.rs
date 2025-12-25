@@ -252,7 +252,7 @@ impl FuseDriver {
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
-            .truncate(true)
+            .append(true)
             .open(&full)
             .await
             .context("fuse write open")?;

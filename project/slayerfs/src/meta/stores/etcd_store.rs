@@ -214,9 +214,30 @@ impl EtcdMetaStore {
 
     /// Initialize root directory
     async fn init_root_directory(&self) -> Result<(), MetaError> {
+        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        // Create children key for root directory
         let children_key = Self::etcd_children_key(1);
         let root_children = EtcdDirChildren::new(1, HashMap::new());
         let children_json = serde_json::to_string(&root_children)?;
+
+        // Create reverse key (metadata) for root directory
+        let reverse_key = Self::etcd_reverse_key(1);
+        let root_entry = EtcdEntryInfo {
+            is_file: false,
+            size: None,
+            version: None,
+            permission: Permission::new(0o40755, 0, 0),
+            access_time: now,
+            modify_time: now,
+            create_time: now,
+            nlink: 2,
+            parent_inode: 1, // Root's parent is itself
+            entry_name: "/".to_string(),
+            deleted: false,
+            symlink_target: None,
+        };
+        let reverse_json = serde_json::to_string(&root_entry)?;
 
         let mut client = self.client.clone();
 
@@ -224,7 +245,10 @@ impl EtcdMetaStore {
         // version == 0 means the key is currently not present
         let txn = Txn::new()
             .when([Compare::version(children_key.clone(), CompareOp::Equal, 0)])
-            .and_then([TxnOp::put(children_key.clone(), children_json, None)]);
+            .and_then([
+                TxnOp::put(children_key.clone(), children_json, None),
+                TxnOp::put(reverse_key, reverse_json, None),
+            ]);
 
         let resp = client.txn(txn).await.map_err(|e| {
             MetaError::Config(format!("Failed to initialize root directory: {}", e))
@@ -1189,37 +1213,7 @@ impl MetaStore for EtcdMetaStore {
             .etcd_get_json_lenient::<EtcdEntryInfo>(&reverse_key)
             .await
         {
-            let permission = entry_info.permission;
-
-            // Determine file type and size based on metadata
-            let (kind, size) = if entry_info.is_file {
-                let file_type = if entry_info.symlink_target.is_some() {
-                    FileType::Symlink
-                } else {
-                    FileType::File
-                };
-                let file_size = if let Some(target) = &entry_info.symlink_target {
-                    target.len() as u64
-                } else {
-                    entry_info.size.unwrap_or(0) as u64
-                };
-                (file_type, file_size)
-            } else {
-                (FileType::Dir, 4096)
-            };
-
-            return Ok(Some(FileAttr {
-                ino,
-                size,
-                kind,
-                mode: permission.mode,
-                uid: permission.uid,
-                gid: permission.gid,
-                atime: entry_info.access_time,
-                mtime: entry_info.modify_time,
-                ctime: entry_info.create_time,
-                nlink: entry_info.nlink,
-            }));
+            return Ok(Some(entry_info.to_file_attr(ino)));
         }
 
         Ok(None)
@@ -1289,37 +1283,7 @@ impl MetaStore for EtcdMetaStore {
                         // Parse EtcdEntryInfo from the value
                         if let Ok(entry_info) = serde_json::from_slice::<EtcdEntryInfo>(kv.value())
                         {
-                            let permission = entry_info.permission;
-
-                            // Determine file type and size
-                            let (kind, size) = if entry_info.is_file {
-                                let file_type = if entry_info.symlink_target.is_some() {
-                                    FileType::Symlink
-                                } else {
-                                    FileType::File
-                                };
-                                let file_size = if let Some(target) = &entry_info.symlink_target {
-                                    target.len() as u64
-                                } else {
-                                    entry_info.size.unwrap_or(0) as u64
-                                };
-                                (file_type, file_size)
-                            } else {
-                                (FileType::Dir, 4096)
-                            };
-
-                            results[result_idx] = Some(FileAttr {
-                                ino,
-                                size,
-                                kind,
-                                mode: permission.mode,
-                                uid: permission.uid,
-                                gid: permission.gid,
-                                atime: entry_info.access_time,
-                                mtime: entry_info.modify_time,
-                                ctime: entry_info.create_time,
-                                nlink: entry_info.nlink,
-                            });
+                            results[result_idx] = Some(entry_info.to_file_attr(ino));
                         }
                     }
                 }
