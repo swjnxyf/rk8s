@@ -11,78 +11,46 @@ pub mod response;
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
 
-/// Trait for types that can be converted into header names
-pub trait IntoHeaderName {
-    /// Convert into header name bytes
-    fn into_header_name(self) -> Vec<u8>;
+/// Trait for types that can be converted into metadata bytes (keys or values)
+/// 
+/// This trait consolidates the conversion of various types into binary metadata.
+pub trait IntoMetadataBytes {
+    /// Convert into metadata bytes
+    fn into_metadata_bytes(self) -> Vec<u8>;
 }
 
-/// Trait for types that can be converted into header values
-pub trait IntoHeaderValue {
-    /// Convert into header value bytes
-    fn into_header_value(self) -> Vec<u8>;
-}
-
-// Implement IntoHeaderName for common types
-impl IntoHeaderName for &str {
+// Implement for common types
+impl IntoMetadataBytes for &str {
     #[inline]
-    fn into_header_name(self) -> Vec<u8> {
+    fn into_metadata_bytes(self) -> Vec<u8> {
         self.as_bytes().to_vec()
     }
 }
 
-impl IntoHeaderName for String {
+impl IntoMetadataBytes for String {
     #[inline]
-    fn into_header_name(self) -> Vec<u8> {
+    fn into_metadata_bytes(self) -> Vec<u8> {
         self.into_bytes()
     }
 }
 
-impl IntoHeaderName for &[u8] {
+impl IntoMetadataBytes for &[u8] {
     #[inline]
-    fn into_header_name(self) -> Vec<u8> {
+    fn into_metadata_bytes(self) -> Vec<u8> {
         self.to_vec()
     }
 }
 
-impl IntoHeaderName for Vec<u8> {
+impl IntoMetadataBytes for Vec<u8> {
     #[inline]
-    fn into_header_name(self) -> Vec<u8> {
-        self
-    }
-}
-
-// Implement IntoHeaderValue for common types
-impl IntoHeaderValue for &str {
-    #[inline]
-    fn into_header_value(self) -> Vec<u8> {
-        self.as_bytes().to_vec()
-    }
-}
-
-impl IntoHeaderValue for String {
-    #[inline]
-    fn into_header_value(self) -> Vec<u8> {
-        self.into_bytes()
-    }
-}
-
-impl IntoHeaderValue for &[u8] {
-    #[inline]
-    fn into_header_value(self) -> Vec<u8> {
-        self.to_vec()
-    }
-}
-
-impl IntoHeaderValue for Vec<u8> {
-    #[inline]
-    fn into_header_value(self) -> Vec<u8> {
+    fn into_metadata_bytes(self) -> Vec<u8> {
         self
     }
 }
 
 /// Metadata for RPC requests and responses
 /// Similar to tonic::MetadataMap but uses binary data internally
+/// Infact,the entry num usually be less than ten,and the key/value size is usually less than 128 bytes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaData {
     /// Key-value pairs for metadata (both binary)
@@ -100,28 +68,55 @@ impl MetaData {
     }
 
     /// Create metadata with a single key-value pair
+    ///
+    /// # Panics
+    /// Panics if key or value exceeds 65535 bytes (codec limit)
     #[must_use]
     #[inline]
     pub fn with_entry<K, V>(key: K, value: V) -> Self
     where
-        K: IntoHeaderName,
-        V: IntoHeaderValue,
+        K: IntoMetadataBytes,
+        V: IntoMetadataBytes,
     {
-        let mut headers = HashMap::new();
-        let _ignore = headers.insert(key.into_header_name(), value.into_header_value());
-        Self { headers }
+        let mut meta = Self::new();
+        meta.insert(key, value);
+        meta
     }
 
     /// Insert a key-value pair
+    ///
+    /// # Panics
+    /// Panics if:
+    /// - Key exceeds 65535 bytes (u16::MAX)
+    /// - Value exceeds 65535 bytes (u16::MAX)
+    /// - Total entries would exceed 255 (u8::MAX)
     #[inline]
     pub fn insert<K, V>(&mut self, key: K, value: V)
     where
-        K: IntoHeaderName,
-        V: IntoHeaderValue,
+        K: IntoMetadataBytes,
+        V: IntoMetadataBytes,
     {
-        let _ignore = self
-            .headers
-            .insert(key.into_header_name(), value.into_header_value());
+        let key_bytes = key.into_metadata_bytes();
+        let value_bytes = value.into_metadata_bytes();
+        
+        assert!(
+            key_bytes.len() <= u16::MAX as usize,
+            "Metadata key exceeds 65535 bytes (got {})",
+            key_bytes.len()
+        );
+        assert!(
+            value_bytes.len() <= u16::MAX as usize,
+            "Metadata value exceeds 65535 bytes (got {})",
+            value_bytes.len()
+        );
+        
+        self.headers.insert(key_bytes, value_bytes);
+        
+        assert!(
+            self.headers.len() <= 255,
+            "Metadata cannot exceed 255 entries (got {})",
+            self.headers.len()
+        );
     }
 
     /// Get a value by key (returns binary data)
@@ -149,15 +144,13 @@ impl MetaData {
     /// Get the authentication token if present (as UTF-8 string)
     #[must_use]
     pub fn token(&self) -> Option<&str> {
-        self.get_str("token")
-            .and_then(Result::ok)
-            .or_else(|| self.get_str("authorization").and_then(Result::ok))
+        self.get_str("authorization").and_then(Result::ok)
     }
 
     /// Set the authentication token
     #[inline]
-    pub fn set_token<V: IntoHeaderValue>(&mut self, token: V) {
-        self.insert("token", token);
+    pub fn set_token<V: IntoMetadataBytes>(&mut self, token: V) {
+        self.insert("authorization", token);
     }
 
     /// Get all headers as binary data
@@ -240,11 +233,6 @@ mod tests {
 
         meta.set_token("my-token");
         assert_eq!(meta.token(), Some("my-token"));
-
-        // Test authorization fallback
-        let mut meta2 = MetaData::new();
-        meta2.insert("authorization", "auth-token");
-        assert_eq!(meta2.token(), Some("auth-token"));
     }
 
     #[test]

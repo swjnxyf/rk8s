@@ -116,10 +116,7 @@ impl BinaryCodec {
         let mut meta = MetaData::new();
         let mut pos = 0;
         
-        // Read count
-        if pos >= bytes.len() {
-            return Err(DecodeError::InvalidFormat);
-        }
+        // Read count (bytes is guaranteed non-empty here)
         let count = bytes[pos];
         pos += 1;
         
@@ -357,16 +354,25 @@ mod tests {
     #[test]
     fn test_metadata_max_entries() {
         let mut meta = MetaData::new();
-        // Add 300 entries (more than u8::MAX = 255)
-        for i in 0..300 {
+        // Add exactly 255 entries (u8::MAX)
+        for i in 0..255 {
             meta.insert(format!("k{}", i), format!("v{}", i));
         }
 
         let encoded = BinaryCodec::encode_metadata(&meta);
         let decoded = BinaryCodec::decode_metadata(&encoded).unwrap();
 
-        // Only first 255 should be encoded
         assert_eq!(decoded.len(), 255);
+    }
+
+    #[test]
+    #[should_panic(expected = "Metadata cannot exceed 255 entries")]
+    fn test_metadata_exceeds_max_entries() {
+        let mut meta = MetaData::new();
+        // Try to add 256 entries - should panic
+        for i in 0..256 {
+            meta.insert(format!("k{}", i), format!("v{}", i));
+        }
     }
 
     #[test]

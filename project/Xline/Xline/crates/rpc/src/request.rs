@@ -7,13 +7,13 @@ use crate::{MetaData, codec::{Codec, BinaryCodec, EncodeError, DecodeError}};
 /// Generic RPC request wrapper
 ///
 /// Separates metadata (headers, auth tokens) from the actual request data.
-/// T should be a protobuf Message type, not RequestWrapper.
+/// T should be a protobuf Message type, and usually as RequestWrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request<T: Message> {
     /// The actual request data
-    pub data: T,
+    data: T,
     /// Metadata (headers, tokens, etc.)
-    pub meta: MetaData,
+    meta: MetaData,
 }
 
 impl<T: Message> Request<T> {
@@ -37,7 +37,7 @@ impl<T: Message> Request<T> {
     /// Create a new request with data and a token
     #[must_use]
     #[inline]
-    pub fn with_token<V: crate::IntoHeaderValue>(data: T, token: V) -> Self {
+    pub fn with_token<V: crate::IntoMetadataBytes>(data: T, token: V) -> Self {
         let mut meta = MetaData::new();
         meta.set_token(token);
         Self { data, meta }
@@ -51,7 +51,6 @@ impl<T: Message> Request<T> {
     }
 
     /// Get a mutable reference to the data
-    #[must_use]
     #[inline]
     pub fn data_mut(&mut self) -> &mut T {
         &mut self.data
@@ -65,7 +64,6 @@ impl<T: Message> Request<T> {
     }
 
     /// Get a mutable reference to the metadata
-    #[must_use]
     #[inline]
     pub fn meta_mut(&mut self) -> &mut MetaData {
         &mut self.meta

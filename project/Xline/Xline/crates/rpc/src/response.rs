@@ -7,13 +7,13 @@ use crate::{MetaData, codec::{Codec, BinaryCodec, EncodeError, DecodeError}};
 /// Generic RPC response wrapper
 ///
 /// Separates metadata (headers, status) from the actual response data.
-/// T should be a protobuf Message type, not ResponseWrapper.
+/// T should be a protobuf Message type, and usually as ResponseWrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Response<T: Message> {
     /// The actual response data
-    pub data: T,
+    data: T,
     /// Metadata (headers, status, etc.)
-    pub meta: MetaData,
+    meta: MetaData,
 }
 
 impl<T: Message> Response<T> {
@@ -37,7 +37,7 @@ impl<T: Message> Response<T> {
     /// Create a new response with data and status metadata
     #[must_use]
     #[inline]
-    pub fn with_status<V: crate::IntoHeaderValue>(data: T, status: V) -> Self {
+    pub fn with_status<V: crate::IntoMetadataBytes>(data: T, status: V) -> Self {
         let mut meta = MetaData::new();
         meta.insert("status", status);
         Self { data, meta }
@@ -51,7 +51,6 @@ impl<T: Message> Response<T> {
     }
 
     /// Get a mutable reference to the data
-    #[must_use]
     #[inline]
     pub fn data_mut(&mut self) -> &mut T {
         &mut self.data
@@ -65,7 +64,6 @@ impl<T: Message> Response<T> {
     }
 
     /// Get a mutable reference to the metadata
-    #[must_use]
     #[inline]
     pub fn meta_mut(&mut self) -> &mut MetaData {
         &mut self.meta
