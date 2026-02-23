@@ -7,9 +7,11 @@ use std::collections::HashMap;
 pub mod codec;
 pub mod request;
 pub mod response;
+pub mod status;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
+pub use status::{Code, Status};
 
 /// Trait for types that can be converted into metadata bytes (keys or values)
 ///
