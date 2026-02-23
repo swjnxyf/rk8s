@@ -1,8 +1,8 @@
 use curp::cmd::Command as CurpCommand;
 use thiserror::Error;
-use xlineapi::{command::Command, execute_error::ExecuteError};
 use tonic::Status;
 use tonic::transport::Error;
+use xlineapi::{command::Command, execute_error::ExecuteError};
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 /// The result type for `xline-client`

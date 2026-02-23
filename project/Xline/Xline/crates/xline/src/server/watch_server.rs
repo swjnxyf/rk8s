@@ -7,10 +7,10 @@ use std::{
 use event_listener::Event;
 use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tonic::Status;
 use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -473,8 +473,7 @@ mod test {
         let task_manager = Arc::new(TaskManager::new());
         let (req_tx, req_rx) = mpsc::channel(CHANNEL_SIZE);
         let (res_tx, mut res_rx) = mpsc::channel(CHANNEL_SIZE);
-        let req_stream: ReceiverStream<Result<WatchRequest, Status>> =
-            ReceiverStream::new(req_rx);
+        let req_stream: ReceiverStream<Result<WatchRequest, Status>> = ReceiverStream::new(req_rx);
         let header_gen = Arc::new(HeaderGenerator::new(0, 0));
         let mut mock_watcher = MockKvWatcherOps::new();
         let _ = mock_watcher.expect_watch().times(1).return_const(());
@@ -666,8 +665,7 @@ mod test {
         let task_manager = Arc::new(TaskManager::new());
         let (req_tx, req_rx) = mpsc::channel(CHANNEL_SIZE);
         let (res_tx, mut res_rx) = mpsc::channel(CHANNEL_SIZE);
-        let req_stream: ReceiverStream<Result<WatchRequest, Status>> =
-            ReceiverStream::new(req_rx);
+        let req_stream: ReceiverStream<Result<WatchRequest, Status>> = ReceiverStream::new(req_rx);
         let header_gen = Arc::new(HeaderGenerator::new(0, 0));
         let mut mock_watcher = MockKvWatcherOps::new();
         let _ = mock_watcher.expect_watch().times(1).return_const(());
@@ -730,8 +728,7 @@ mod test {
         let task_manager = Arc::new(TaskManager::new());
         let (req_tx, req_rx) = mpsc::channel(CHANNEL_SIZE);
         let (res_tx, res_rx) = mpsc::channel(CHANNEL_SIZE);
-        let req_stream: ReceiverStream<Result<WatchRequest, Status>> =
-            ReceiverStream::new(req_rx);
+        let req_stream: ReceiverStream<Result<WatchRequest, Status>> = ReceiverStream::new(req_rx);
         let header_gen = Arc::new(HeaderGenerator::new(0, 0));
         let mut mock_watcher = MockKvWatcherOps::new();
         let _ = mock_watcher.expect_watch().times(1).return_const(());

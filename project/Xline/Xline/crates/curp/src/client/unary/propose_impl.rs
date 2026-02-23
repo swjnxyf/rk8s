@@ -10,7 +10,9 @@ use crate::{
     rpc::{CurpError, OpResponse, ProposeId, ProposeRequest, RecordRequest, ResponseOp},
     super_quorum,
 };
-
+// use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use super::Unary;
 
 /// A stream of propose events

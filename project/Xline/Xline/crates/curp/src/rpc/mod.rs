@@ -11,7 +11,9 @@ use curp_external_api::{
 use futures::Stream;
 use prost::Message;
 use serde::{Deserialize, Serialize};
-
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 pub(crate) use self::proto::{
     commandpb::CurpError as CurpErrorWrapper,
     inner_messagepb::{
@@ -938,9 +940,9 @@ impl<E: std::error::Error + 'static> From<E> for CurpError {
     #[inline]
     fn from(value: E) -> Self {
         let err: &dyn std::error::Error = &value;
-        if let Some(status) = err.downcast_ref::<tonic::Status>() {
+        if let Some(status) = err.downcast_ref::<Status>() {
             // Unavailable code often occurs in rpc connection errors,
-            // Please DO NOT use this code in CurpError to tonic::Status.
+            // Please DO NOT use this code in CurpError to Status.
             if status.code() == tonic::Code::Unavailable {
                 return Self::RpcTransport(());
             }
@@ -959,7 +961,7 @@ impl<E: std::error::Error + 'static> From<E> for CurpError {
     }
 }
 
-impl From<CurpError> for tonic::Status {
+impl From<CurpError> for Status {
     #[inline]
     fn from(err: CurpError) -> Self {
         let (code, msg) = match err {
@@ -1020,7 +1022,7 @@ impl From<CurpError> for tonic::Status {
 
         let details = CurpErrorWrapper { err: Some(err) }.encode_to_vec();
 
-        tonic::Status::with_details(code, msg, details.into())
+        Status::with_details(code, msg, details.into())
     }
 }
 

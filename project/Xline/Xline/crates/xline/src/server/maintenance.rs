@@ -7,12 +7,12 @@ use curp::{cmd::CommandExecutor as _, members::ClusterInfo, server::RawCurp};
 use engine::SnapshotApi;
 use futures::stream::Stream;
 use sha2::{Digest, Sha256};
+use tonic::Status;
 use tracing::{debug, error};
 use xlineapi::{
     RequestWrapper,
     command::{Command, CommandResponse, CurpClient, SyncResponse},
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::command::CommandExecutor;
@@ -186,8 +186,7 @@ impl Maintenance for MaintenanceServer {
         }))
     }
 
-    type SnapshotStream =
-        Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
+    type SnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotResponse, Status>> + Send>>;
 
     async fn snapshot(
         &self,

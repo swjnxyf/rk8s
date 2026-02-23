@@ -16,10 +16,13 @@ use futures::StreamExt;
 #[cfg(test)]
 use mockall::automock;
 use tokio::sync::Mutex;
+use tonic::Status;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, error, info, instrument};
 use utils::{build_endpoint, tracing::Inject};
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use crate::{
     members::ServerId,
@@ -356,7 +359,7 @@ impl<C> Connect<C> {
 
     /// After RPC
     #[cfg(feature = "client-metrics")]
-    fn after_rpc<R>(&self, start_at: std::time::Instant, res: &Result<R, tonic::Status>) {
+    fn after_rpc<R>(&self, start_at: std::time::Instant, res: &Result<R, Status>) {
         super::metrics::get().peer_round_trip_time_seconds.record(
             start_at.elapsed().as_secs(),
             &[opentelemetry::KeyValue::new("to", self.id.to_string())],
@@ -378,7 +381,7 @@ macro_rules! with_timeout {
     ($timeout:expr_2021, $client_op:expr_2021) => {
         tokio::time::timeout($timeout, $client_op)
             .await
-            .map_err(|_| tonic::Status::deadline_exceeded("timeout"))?
+            .map_err(|_| Status::deadline_exceeded("timeout"))?
     };
 }
 

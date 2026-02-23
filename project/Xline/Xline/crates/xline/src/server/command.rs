@@ -12,6 +12,7 @@ use dashmap::DashMap;
 use engine::{Snapshot, TransactionApi};
 use event_listener::Event;
 use parking_lot::RwLock;
+use tonic::Status;
 use tracing::warn;
 use utils::{barrier::IdBarrier, table_names::META_TABLE};
 use xlineapi::{
@@ -20,7 +21,6 @@ use xlineapi::{
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 

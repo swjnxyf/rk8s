@@ -6,12 +6,12 @@ use event_listener::Event;
 use periodic_compactor::PeriodicCompactor;
 use revision_compactor::RevisionCompactor;
 use tokio::time::sleep;
+use tonic::Status;
 use utils::{
     config::AutoCompactConfig,
     task_manager::{Listener, TaskManager, tasks::TaskName},
 };
 use xlineapi::{RequestWrapper, command::Command, execute_error::ExecuteError};
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -49,9 +49,7 @@ pub(crate) trait Compactable: Send + Sync + 'static {
 }
 
 #[async_trait]
-impl Compactable
-    for Arc<dyn ClientApi<Error = Status, Cmd = Command> + Sync + Send + 'static>
-{
+impl Compactable for Arc<dyn ClientApi<Error = Status, Cmd = Command> + Sync + Send + 'static> {
     async fn compact(&self, revision: i64) -> Result<i64, Status> {
         let request = RequestWrapper::from(CompactionRequest {
             revision,

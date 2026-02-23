@@ -2,9 +2,9 @@ use opentelemetry::{
     global,
     propagation::{Extractor, Injector},
 };
+use tonic::metadata::MetadataMap;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tonic::metadata::MetadataMap;
 // TODO: use our own MetaData.
 // use xlinerpc::MetaData as MetaDataMap;
 

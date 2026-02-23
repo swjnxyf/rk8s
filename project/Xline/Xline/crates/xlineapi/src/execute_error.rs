@@ -4,7 +4,7 @@ use curp::cmd::{PbCodec, PbSerializeError};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tonic::{Code,Status};
+use tonic::{Code, Status};
 // TODO: use our status/code to replace this.
 // use xlinerpc::status::{Code,Status};
 use crate::{PbExecuteError, PbExecuteErrorOuter, PbRevisions, PbUserRole};
@@ -307,9 +307,7 @@ impl From<ExecuteError> for Status {
             ExecuteError::LeaseExpired(_) => (Code::DeadlineExceeded, err.to_string()),
             ExecuteError::UserAlreadyHasRole(_, _)
             | ExecuteError::NoPasswordUser
-            | ExecuteError::TokenManagerNotInit => {
-                (Code::FailedPrecondition, err.to_string())
-            }
+            | ExecuteError::TokenManagerNotInit => (Code::FailedPrecondition, err.to_string()),
             ExecuteError::TokenNotProvided => (Code::InvalidArgument, err.to_string()),
             ExecuteError::DbError(_) => (Code::Internal, err.to_string()),
         };

@@ -16,13 +16,13 @@ use pbkdf2::{
     Pbkdf2,
     password_hash::{PasswordHash, PasswordVerifier},
 };
+use tonic::Status;
 use utils::parking_lot_lock::RwLockMap;
 use xlineapi::{
     AuthInfo,
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 

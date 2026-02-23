@@ -5,6 +5,7 @@ use clippy_utilities::NumericCast;
 use curp::members::ClusterInfo;
 use futures::stream::Stream;
 use tokio::time;
+use tonic::Status;
 use tonic::transport::{ClientTlsConfig, Endpoint};
 use tracing::{debug, warn};
 use utils::{
@@ -15,7 +16,6 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -51,8 +51,7 @@ pub(crate) struct LeaseServer {
 }
 
 /// A lease keep alive stream
-type KeepAliveStream =
-    Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>;
+type KeepAliveStream = Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>;
 
 impl LeaseServer {
     /// New `LeaseServer`
@@ -238,8 +237,8 @@ fn build_endpoints(
     addrs
         .iter()
         .map(|addr| {
-            let endpoint = build_endpoint(addr, tls_config)
-                .map_err(|e| Status::internal(e.to_string()))?;
+            let endpoint =
+                build_endpoint(addr, tls_config).map_err(|e| Status::internal(e.to_string()))?;
             Ok(endpoint)
         })
         .collect()

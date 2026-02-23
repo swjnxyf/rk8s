@@ -11,9 +11,9 @@ use curp::{
     },
 };
 use flume::r#async::RecvStream;
+use tonic::Status;
 use tracing::debug;
 use xlineapi::command::Command;
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use super::xline_server::CurpServer;

@@ -10,13 +10,13 @@ use dashmap::DashMap;
 use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
+use tonic::Status;
 use tracing::{debug, instrument};
 use xlineapi::{
     AuthInfo, ResponseWrapper,
     command::{Command, CurpClient},
     request_validation::RequestValidator,
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 
@@ -85,11 +85,7 @@ impl KvServer {
     }
 
     /// Propose request and get result with fast/slow path
-    async fn propose<T>(
-        &self,
-        request: T,
-        auth_info: Option<AuthInfo>,
-    ) -> Result<Response, Status>
+    async fn propose<T>(&self, request: T, auth_info: Option<AuthInfo>) -> Result<Response, Status>
     where
         T: Into<RequestWrapper>,
     {
@@ -412,8 +408,7 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status =
-            Status::from(compact_request.check_revision(3, 8).unwrap_err());
+        let expected_tonic_status = Status::from(compact_request.check_revision(3, 8).unwrap_err());
         assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
 
         let expected_tonic_status =

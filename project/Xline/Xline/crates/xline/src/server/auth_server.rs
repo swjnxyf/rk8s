@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use tonic::Status;
 use tonic::metadata::MetadataMap;
 use tracing::debug;
 use utils::hash_password;
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use xlineapi::{

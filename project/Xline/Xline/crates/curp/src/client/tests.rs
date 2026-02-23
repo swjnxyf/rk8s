@@ -9,7 +9,8 @@ use futures::{Stream, future::BoxFuture};
 use tonic::Status;
 use tonic::transport::ClientTlsConfig;
 use tracing_test::traced_test;
-
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 use super::{
     state::State,
     stream::{Streaming, StreamingConfig},

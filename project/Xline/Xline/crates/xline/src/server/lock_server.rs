@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
+use tonic::Status;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tracing::debug;
 use utils::build_endpoint;
@@ -10,7 +11,6 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
-use tonic::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
