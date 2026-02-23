@@ -19,6 +19,10 @@ use tonic::transport::server::{Connected, Router};
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
 
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
+
 use utils::{
     barrier::IdBarrier,
     config::{
@@ -551,7 +555,7 @@ impl XlineServer {
     }
 
     /// Publish the name of current node to cluster
-    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), tonic::Status> {
+    async fn publish(&self, curp_client: Arc<CurpClient>) -> Result<(), Status> {
         curp_client
             .propose_publish(
                 self.cluster_info.self_id(),

@@ -16,6 +16,9 @@ use xlineapi::{
     command::{Command, CurpClient},
     request_validation::RequestValidator,
 };
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use crate::{
     revision_check::RevisionCheck,
@@ -74,7 +77,7 @@ impl KvServer {
 
     /// serializable execute request in current node
     #[allow(clippy::result_large_err)]
-    fn do_serializable(&self, command: &Command) -> Result<Response, tonic::Status> {
+    fn do_serializable(&self, command: &Command) -> Result<Response, Status> {
         self.auth_storage
             .check_permission(command.request(), command.auth_info())?;
         let cmd_res = self.kv_storage.execute(command.request(), None)?;
@@ -86,7 +89,7 @@ impl KvServer {
         &self,
         request: T,
         auth_info: Option<AuthInfo>,
-    ) -> Result<Response, tonic::Status>
+    ) -> Result<Response, Status>
     where
         T: Into<RequestWrapper>,
     {
@@ -141,7 +144,7 @@ impl Kv for KvServer {
     async fn range(
         &self,
         request: tonic::Request<RangeRequest>,
-    ) -> Result<tonic::Response<RangeResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<RangeResponse>, Status> {
         let range_req = request.get_ref();
         range_req.validation()?;
         debug!("Receive grpc request: {}", range_req);
@@ -173,7 +176,7 @@ impl Kv for KvServer {
     async fn put(
         &self,
         request: tonic::Request<PutRequest>,
-    ) -> Result<tonic::Response<PutResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<PutResponse>, Status> {
         let put_req: &PutRequest = request.get_ref();
         put_req.validation()?;
         debug!("Receive grpc request: {:?}", put_req);
@@ -194,7 +197,7 @@ impl Kv for KvServer {
     async fn delete_range(
         &self,
         request: tonic::Request<DeleteRangeRequest>,
-    ) -> Result<tonic::Response<DeleteRangeResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<DeleteRangeResponse>, Status> {
         let delete_range_req = request.get_ref();
         delete_range_req.validation()?;
         debug!("Receive grpc request: {:?}", delete_range_req);
@@ -216,7 +219,7 @@ impl Kv for KvServer {
     async fn txn(
         &self,
         request: tonic::Request<TxnRequest>,
-    ) -> Result<tonic::Response<TxnResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<TxnResponse>, Status> {
         let txn_req = request.get_ref();
         txn_req.validation()?;
         debug!("Receive grpc request: {}", txn_req);
@@ -240,7 +243,7 @@ impl Kv for KvServer {
     async fn compact(
         &self,
         request: tonic::Request<CompactionRequest>,
-    ) -> Result<tonic::Response<CompactionResponse>, tonic::Status> {
+    ) -> Result<tonic::Response<CompactionResponse>, Status> {
         debug!("Receive CompactionRequest {:?}", request);
         let compacted_revision = self.kv_storage.compacted_revision();
         let current_revision = self.kv_storage.revision();
@@ -265,7 +268,7 @@ impl Kv for KvServer {
             .await
             .is_err()
         {
-            return Err(tonic::Status::deadline_exceeded("Compact timeout"));
+            return Err(Status::deadline_exceeded("Compact timeout"));
         }
 
         if let ResponseWrapper::CompactionResponse(response) = resp {
@@ -335,7 +338,7 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             range_request_with_future_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
@@ -348,7 +351,7 @@ mod test {
             ..Default::default()
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             range_request_with_compacted_rev
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
@@ -373,7 +376,7 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             txn_request_with_future_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
@@ -393,7 +396,7 @@ mod test {
             failure: vec![],
         };
 
-        let expected_tonic_status = tonic::Status::from(
+        let expected_tonic_status = Status::from(
             txn_request_with_compacted_revision
                 .check_revision(compacted_revision, current_revision)
                 .unwrap_err(),
@@ -410,11 +413,11 @@ mod test {
         };
 
         let expected_tonic_status =
-            tonic::Status::from(compact_request.check_revision(3, 8).unwrap_err());
+            Status::from(compact_request.check_revision(3, 8).unwrap_err());
         assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
 
         let expected_tonic_status =
-            tonic::Status::from(compact_request.check_revision(13, 18).unwrap_err());
+            Status::from(compact_request.check_revision(13, 18).unwrap_err());
         assert_eq!(expected_tonic_status.code(), tonic::Code::OutOfRange);
     }
 }

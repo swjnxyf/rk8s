@@ -2267,14 +2267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rpc"
-version = "0.1.0"
-dependencies = [
- "prost",
- "thiserror",
-]
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3108,6 +3100,7 @@ dependencies = [
  "tracing-appender",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "xlinerpc",
 ]
 
 [[package]]
@@ -3481,6 +3474,7 @@ dependencies = [
  "xline-client",
  "xline-test-utils",
  "xlineapi",
+ "xlinerpc",
 ]
 
 [[package]]
@@ -3506,6 +3500,7 @@ dependencies = [
  "utils",
  "xline-test-utils",
  "xlineapi",
+ "xlinerpc",
 ]
 
 [[package]]
@@ -3537,6 +3532,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "utils",
+ "xlinerpc",
 ]
 
 [[package]]
@@ -3554,6 +3550,14 @@ dependencies = [
  "utils",
  "xline-client",
  "xlineapi",
+]
+
+[[package]]
+name = "xlinerpc"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "thiserror",
 ]
 
 [[package]]

@@ -20,6 +20,9 @@ use xlineapi::{
     command::{Command, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use crate::{
     revision_number::RevisionNumberGeneratorState,
@@ -206,7 +209,7 @@ impl Alarmer {
     }
 
     /// Propose alarm request to other nodes
-    async fn alarm(&self, action: AlarmAction, alarm: AlarmType) -> Result<(), tonic::Status> {
+    async fn alarm(&self, action: AlarmAction, alarm: AlarmType) -> Result<(), Status> {
         let request = RequestWrapper::from(AlarmRequest::new(action, self.id, alarm));
         let cmd = Command::new(request);
         let _ig = self.client.propose(&cmd, None, true).await?;

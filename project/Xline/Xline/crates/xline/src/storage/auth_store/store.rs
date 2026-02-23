@@ -22,6 +22,9 @@ use xlineapi::{
     command::{CommandResponse, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use super::{
     backend::{ROOT_ROLE, ROOT_USER},
@@ -130,7 +133,7 @@ impl AuthStore {
     pub(crate) fn try_get_auth_info_from_request<T>(
         &self,
         request: &tonic::Request<T>,
-    ) -> Result<Option<AuthInfo>, tonic::Status> {
+    ) -> Result<Option<AuthInfo>, Status> {
         if !self.is_enabled() {
             return Ok(None);
         }

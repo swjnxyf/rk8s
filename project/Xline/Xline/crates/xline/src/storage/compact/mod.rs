@@ -11,6 +11,9 @@ use utils::{
     task_manager::{Listener, TaskManager, tasks::TaskName},
 };
 use xlineapi::{RequestWrapper, command::Command, execute_error::ExecuteError};
+use tonic::Status;
+// TODO: use our own status type
+// use xlinerpc::status::Status;
 
 use super::{KvStore, index::Index};
 use crate::{revision_number::RevisionNumberGenerator, rpc::CompactionRequest};
@@ -42,14 +45,14 @@ pub(crate) trait Compactor<C: Compactable>: Send + Sync {
 #[async_trait]
 pub(crate) trait Compactable: Send + Sync + 'static {
     /// do compact, return the compacted revision or rpc error
-    async fn compact(&self, revision: i64) -> Result<i64, tonic::Status>;
+    async fn compact(&self, revision: i64) -> Result<i64, Status>;
 }
 
 #[async_trait]
 impl Compactable
-    for Arc<dyn ClientApi<Error = tonic::Status, Cmd = Command> + Sync + Send + 'static>
+    for Arc<dyn ClientApi<Error = Status, Cmd = Command> + Sync + Send + 'static>
 {
-    async fn compact(&self, revision: i64) -> Result<i64, tonic::Status> {
+    async fn compact(&self, revision: i64) -> Result<i64, Status> {
         let request = RequestWrapper::from(CompactionRequest {
             revision,
             physical: false,
@@ -61,7 +64,7 @@ impl Compactable
         if let ExecuteError::RevisionCompacted(_, compacted_rev) = err {
             return Ok(compacted_rev);
         }
-        Err(tonic::Status::from(err))
+        Err(Status::from(err))
     }
 }
 
