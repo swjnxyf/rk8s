@@ -12,7 +12,7 @@ pub mod response;
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
 
 /// Trait for types that can be converted into metadata bytes (keys or values)
-/// 
+///
 /// This trait consolidates the conversion of various types into binary metadata.
 pub trait IntoMetadataBytes {
     /// Convert into metadata bytes
@@ -98,7 +98,7 @@ impl MetaData {
     {
         let key_bytes = key.into_metadata_bytes();
         let value_bytes = value.into_metadata_bytes();
-        
+
         assert!(
             key_bytes.len() <= u16::MAX as usize,
             "Metadata key exceeds 65535 bytes (got {})",
@@ -109,9 +109,9 @@ impl MetaData {
             "Metadata value exceeds 65535 bytes (got {})",
             value_bytes.len()
         );
-        
+
         self.headers.insert(key_bytes, value_bytes);
-        
+
         assert!(
             self.headers.len() <= 255,
             "Metadata cannot exceed 255 entries (got {})",
@@ -283,10 +283,7 @@ mod tests {
         meta.insert(vec![0xffu8, 0xfe], vec![0x01, 0x02]);
 
         assert_eq!(meta.get("string-key"), Some(b"string-value".as_slice()));
-        assert_eq!(
-            meta.get(&[0xffu8, 0xfe]),
-            Some([0x01u8, 0x02].as_slice())
-        );
+        assert_eq!(meta.get(&[0xffu8, 0xfe]), Some([0x01u8, 0x02].as_slice()));
         assert_eq!(meta.len(), 2);
     }
 }

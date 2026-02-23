@@ -9,9 +9,9 @@ use clippy_utilities::{NumericCast, OverflowArithmetic};
 use engine::{SnapshotAllocator, SnapshotApi};
 use event_listener::Event;
 use futures::{Stream, StreamExt, pin_mut, stream::FuturesUnordered};
-use rand::{Rng, thread_rng};
 use opentelemetry::KeyValue;
 use parking_lot::{Mutex, RwLock};
+use rand::{Rng, thread_rng};
 use tokio::{
     sync::{broadcast, oneshot},
     time::MissedTickBehavior,
@@ -542,7 +542,8 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
                     self.curp.id(),
                 );
                 let (tx, rx) = oneshot::channel();
-                self.as_tx.send(TaskType::Reset(Box::new(Some(snapshot)), tx))?;
+                self.as_tx
+                    .send(TaskType::Reset(Box::new(Some(snapshot)), tx))?;
                 rx.await.map_err(|err| {
                     error!("failed to reset the command executor by snapshot, {err}");
                     CurpError::internal(format!(

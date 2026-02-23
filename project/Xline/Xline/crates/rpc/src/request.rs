@@ -2,7 +2,10 @@
 
 use prost::Message;
 
-use crate::{MetaData, codec::{Codec, BinaryCodec, EncodeError, DecodeError}};
+use crate::{
+    MetaData,
+    codec::{BinaryCodec, Codec, DecodeError, EncodeError},
+};
 
 /// Generic RPC request wrapper
 ///

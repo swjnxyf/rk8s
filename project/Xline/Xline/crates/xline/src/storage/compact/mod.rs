@@ -55,7 +55,9 @@ impl Compactable
             physical: false,
         });
         let cmd = Command::new(request);
-        let Err(err) = self.propose(&cmd, None, true).await? else { return Ok(revision) };
+        let Err(err) = self.propose(&cmd, None, true).await? else {
+            return Ok(revision);
+        };
         if let ExecuteError::RevisionCompacted(_, compacted_rev) = err {
             return Ok(compacted_rev);
         }

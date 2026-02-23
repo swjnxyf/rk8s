@@ -526,9 +526,7 @@ impl CurpCommandExecutor<Command> for CommandExecutor {
         general_revision_state.commit();
         auth_revision_state.commit();
 
-        if !quota_enough
-            && let Some(alarmer) = self.alarmer.read().clone()
-        {
+        if !quota_enough && let Some(alarmer) = self.alarmer.read().clone() {
             let _ig = tokio::spawn(async move {
                 if let Err(e) = alarmer
                     .alarm(AlarmAction::Activate, AlarmType::Nospace)

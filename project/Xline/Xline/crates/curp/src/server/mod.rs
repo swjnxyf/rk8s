@@ -407,7 +407,6 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> Rpc<C, CE, RC> {
         }
     }
 
-
     /// Get a subscriber for leader changes
     #[inline]
     #[must_use]

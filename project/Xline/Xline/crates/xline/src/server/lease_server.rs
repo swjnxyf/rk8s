@@ -131,7 +131,11 @@ impl LeaseServer {
     }
 
     /// Handle keep alive at leader
-    #[allow(clippy::arithmetic_side_effects, clippy::ignored_unit_patterns, clippy::result_large_err)] // Introduced by tokio::select!
+    #[allow(
+        clippy::arithmetic_side_effects,
+        clippy::ignored_unit_patterns,
+        clippy::result_large_err
+    )] // Introduced by tokio::select!
     fn leader_keep_alive(
         &self,
         mut request_stream: tonic::Streaming<LeaseKeepAliveRequest>,

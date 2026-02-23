@@ -38,20 +38,13 @@ pub trait Codec: Send + Sync {
     ///
     /// # Errors
     /// Returns error if encoding fails
-    fn encode<T: Message>(
-        &self,
-        data: &T,
-        meta: &MetaData,
-    ) -> Result<Vec<u8>, EncodeError>;
+    fn encode<T: Message>(&self, data: &T, meta: &MetaData) -> Result<Vec<u8>, EncodeError>;
 
     /// Decode bytes into data and metadata
     ///
     /// # Errors
     /// Returns error if decoding fails
-    fn decode<T: Message + Default>(
-        &self,
-        bytes: &[u8],
-    ) -> Result<(T, MetaData), DecodeError>;
+    fn decode<T: Message + Default>(&self, bytes: &[u8]) -> Result<(T, MetaData), DecodeError>;
 }
 
 /// Binary codec implementation
@@ -84,24 +77,24 @@ impl BinaryCodec {
     /// Format: [count: u8][key_len: u16][key][value_len: u16][value]...
     fn encode_metadata(meta: &MetaData) -> Vec<u8> {
         let mut bytes = Vec::new();
-        
+
         // Write count (max 255 entries)
         let count = meta.len().min(255) as u8;
         bytes.push(count);
-        
+
         // Write each key-value pair
         for (key, value) in meta.headers().iter().take(255) {
             // Write key length and key
             let key_len = key.len().min(u16::MAX as usize) as u16;
             bytes.extend_from_slice(&key_len.to_be_bytes());
             bytes.extend_from_slice(&key[..key_len as usize]);
-            
+
             // Write value length and value
             let value_len = value.len().min(u16::MAX as usize) as u16;
             bytes.extend_from_slice(&value_len.to_be_bytes());
             bytes.extend_from_slice(&value[..value_len as usize]);
         }
-        
+
         bytes
     }
 
@@ -112,14 +105,14 @@ impl BinaryCodec {
         if bytes.is_empty() {
             return Ok(MetaData::new());
         }
-        
+
         let mut meta = MetaData::new();
         let mut pos = 0;
-        
+
         // Read count (bytes is guaranteed non-empty here)
         let count = bytes[pos];
         pos += 1;
-        
+
         // Read each key-value pair
         for _ in 0..count {
             // Read key length
@@ -128,44 +121,40 @@ impl BinaryCodec {
             }
             let key_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
             pos += 2;
-            
+
             // Read key
             if pos + key_len > bytes.len() {
                 return Err(DecodeError::InvalidFormat);
             }
             let key = bytes[pos..pos + key_len].to_vec();
             pos += key_len;
-            
+
             // Read value length
             if pos + 2 > bytes.len() {
                 return Err(DecodeError::InvalidFormat);
             }
             let value_len = u16::from_be_bytes([bytes[pos], bytes[pos + 1]]) as usize;
             pos += 2;
-            
+
             // Read value
             if pos + value_len > bytes.len() {
                 return Err(DecodeError::InvalidFormat);
             }
             let value = bytes[pos..pos + value_len].to_vec();
             pos += value_len;
-            
+
             meta.insert(key, value);
         }
-        
+
         Ok(meta)
     }
 }
 
 impl Codec for BinaryCodec {
-    fn encode<T: Message>(
-        &self,
-        data: &T,
-        meta: &MetaData,
-    ) -> Result<Vec<u8>, EncodeError> {
+    fn encode<T: Message>(&self, data: &T, meta: &MetaData) -> Result<Vec<u8>, EncodeError> {
         // Encode metadata
         let meta_bytes = Self::encode_metadata(meta);
-        
+
         // Encode data using protobuf
         let data_bytes = data.encode_to_vec();
 
@@ -179,21 +168,13 @@ impl Codec for BinaryCodec {
         Ok(result)
     }
 
-    fn decode<T: Message + Default>(
-        &self,
-        bytes: &[u8],
-    ) -> Result<(T, MetaData), DecodeError> {
+    fn decode<T: Message + Default>(&self, bytes: &[u8]) -> Result<(T, MetaData), DecodeError> {
         if bytes.len() < 4 {
             return Err(DecodeError::InvalidFormat);
         }
 
         // Read metadata length
-        let meta_len = u32::from_be_bytes([
-            bytes[0],
-            bytes[1],
-            bytes[2],
-            bytes[3],
-        ]) as usize;
+        let meta_len = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
 
         if bytes.len() < 4 + meta_len {
             return Err(DecodeError::InvalidFormat);
@@ -226,7 +207,7 @@ mod tests {
     #[test]
     fn test_binary_codec_encode_decode() {
         let codec = BinaryCodec::new();
-        
+
         let msg = TestMessage {
             name: "test".to_string(),
             value: 42,
@@ -241,7 +222,7 @@ mod tests {
         assert!(!encoded.is_empty());
 
         // Decode
-        let (decoded_msg, decoded_meta): (TestMessage, _) = 
+        let (decoded_msg, decoded_meta): (TestMessage, _) =
             codec.decode(&encoded).expect("decode failed");
 
         assert_eq!(decoded_msg.name, "test");
@@ -253,7 +234,7 @@ mod tests {
     #[test]
     fn test_binary_codec_empty_metadata() {
         let codec = BinaryCodec::new();
-        
+
         let msg = TestMessage {
             name: "hello".to_string(),
             value: 999,
@@ -271,7 +252,7 @@ mod tests {
     #[test]
     fn test_binary_codec_large_metadata() {
         let codec = BinaryCodec::new();
-        
+
         let msg = TestMessage {
             name: "test".to_string(),
             value: 1,
@@ -290,24 +271,20 @@ mod tests {
         for i in 0..50 {
             let key = format!("key{}", i);
             let value = format!("value{}", i);
-            assert_eq!(
-                decoded_meta.get(&key),
-                Some(value.as_bytes())
-            );
+            assert_eq!(decoded_meta.get(&key), Some(value.as_bytes()));
         }
     }
 
     #[test]
     fn test_decode_invalid_format() {
         let codec = BinaryCodec::new();
-        
+
         // Too short
         let result: Result<(TestMessage, MetaData), _> = codec.decode(&[1, 2]);
         assert!(matches!(result, Err(DecodeError::InvalidFormat)));
 
         // Invalid metadata length
-        let result: Result<(TestMessage, MetaData), _> = 
-            codec.decode(&[0, 0, 1, 0, 99]); // meta_len=256 but only 1 byte
+        let result: Result<(TestMessage, MetaData), _> = codec.decode(&[0, 0, 1, 0, 99]); // meta_len=256 but only 1 byte
         assert!(matches!(result, Err(DecodeError::InvalidFormat)));
     }
 
@@ -347,8 +324,14 @@ mod tests {
         let encoded = BinaryCodec::encode_metadata(&meta);
         let decoded = BinaryCodec::decode_metadata(&encoded).unwrap();
 
-        assert_eq!(decoded.get(&[0x00u8, 0x01, 0x02]), Some([0xffu8, 0x00, 0xfe].as_slice()));
-        assert_eq!(decoded.get(b"normal-key"), Some([0x00u8, 0x00, 0x00].as_slice()));
+        assert_eq!(
+            decoded.get(&[0x00u8, 0x01, 0x02]),
+            Some([0xffu8, 0x00, 0xfe].as_slice())
+        );
+        assert_eq!(
+            decoded.get(b"normal-key"),
+            Some([0x00u8, 0x00, 0x00].as_slice())
+        );
     }
 
     #[test]
@@ -389,12 +372,12 @@ mod tests {
     fn test_metadata_decode_truncated() {
         // Incomplete metadata: says 2 entries but data is cut off
         let bad_data = vec![
-            2,    // count = 2
+            2, // count = 2
             0, 3, // key_len = 3
             b'k', b'e', b'y', // key
             0, 5, // value_len = 5
             b'v', b'a', b'l', b'u', b'e', // value
-            // Second entry is missing!
+                  // Second entry is missing!
         ];
 
         let result = BinaryCodec::decode_metadata(&bad_data);

@@ -21,7 +21,6 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-
 use std::{collections::HashMap, fmt::Debug, ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -568,8 +567,6 @@ impl ClientBuilder {
 
         Ok(client)
     }
-
-
 }
 
 impl<P: Protocol> ClientBuilderWithBypass<P> {
