@@ -289,6 +289,22 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_corrupted_protobuf_payload() {
+        let codec = BinaryCodec::new();
+
+        // Valid metadata (0 entries), but corrupted protobuf data
+        // Format: [meta_len: 4 bytes = 1][count: 1 byte = 0][garbage protobuf]
+        let bad_data: Vec<u8> = vec![
+            0, 0, 0, 1, // meta_len = 1 (u32 big-endian)
+            0, // metadata: count = 0 (no entries)
+            0xff, 0xfe, 0xfd, // garbage bytes (invalid protobuf)
+        ];
+
+        let result: Result<(TestMessage, MetaData), _> = codec.decode(&bad_data);
+        assert!(matches!(result, Err(DecodeError::ProtobufError(_))));
+    }
+
+    #[test]
     fn test_metadata_encoding() {
         let mut meta = MetaData::new();
         meta.insert("key1", "value1");
@@ -376,7 +392,8 @@ mod tests {
             0, 3, // key_len = 3
             b'k', b'e', b'y', // key
             0, 5, // value_len = 5
-            b'v', b'a', b'l', b'u', b'e', // value
+            b'v', b'a', b'l', b'u',
+            b'e', // value
                   // Second entry is missing!
         ];
 
