@@ -28,12 +28,12 @@ use curp_external_api::cmd::Command;
 use futures::{StreamExt, stream::FuturesUnordered};
 use parking_lot::RwLock;
 use tokio::task::JoinHandle;
-use tonic::Status;
 use tonic::transport::ClientTlsConfig;
+use tonic::{Code, Status};
 use tracing::{debug, warn};
 use utils::{build_endpoint, config::ClientConfig};
 // TODO: use our own status type
-// use xlinerpc::status::Status;
+// use xlinerpc::status::{Code,Status};
 
 use self::{
     retry::{Retry, RetryConfig},
@@ -340,7 +340,7 @@ impl ClientBuilder {
         loop {
             match self.try_discover_from(&addrs).await {
                 Ok(()) => return Ok(self),
-                Err(e) if matches!(e.code(), tonic::Code::Unavailable) => {
+                Err(e) if matches!(e.code(), Code::Unavailable) => {
                     warn!("cluster is unavailable, sleep for {DISCOVER_SLEEP_DURATION} secs");
                     tokio::time::sleep(Duration::from_secs(DISCOVER_SLEEP_DURATION)).await;
                 }
