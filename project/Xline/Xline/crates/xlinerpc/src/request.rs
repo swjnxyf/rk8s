@@ -37,15 +37,6 @@ impl<T: Message> Request<T> {
         }
     }
 
-    /// Create a new request with data and a token
-    #[must_use]
-    #[inline]
-    pub fn with_token<V: crate::IntoMetadataBytes>(data: T, token: V) -> Self {
-        let mut meta = MetaData::new();
-        meta.set_token(token);
-        Self { data, meta }
-    }
-
     /// Get a reference to the data
     #[must_use]
     #[inline]
@@ -70,13 +61,6 @@ impl<T: Message> Request<T> {
     #[inline]
     pub fn meta_mut(&mut self) -> &mut MetaData {
         &mut self.meta
-    }
-
-    /// Get the authentication token if present
-    #[must_use]
-    #[inline]
-    pub fn token(&self) -> Option<&str> {
-        self.meta.token()
     }
 
     /// Decompose into data and metadata
@@ -151,18 +135,6 @@ mod tests {
         assert_eq!(req.data().name, "test");
         assert_eq!(req.data().value, 42);
         assert!(req.meta().is_empty());
-        assert_eq!(req.token(), None);
-    }
-
-    #[test]
-    fn test_request_with_token() {
-        let msg = TestMessage {
-            name: "test".to_string(),
-            value: 123,
-        };
-        let req = Request::with_token(msg, "my-token");
-
-        assert_eq!(req.token(), Some("my-token"));
     }
 
     #[test]
@@ -173,7 +145,6 @@ mod tests {
         };
 
         let mut meta = MetaData::new();
-        meta.set_token("auth-123");
         meta.insert("trace-id", "trace-456");
 
         let request = Request::new(msg, meta);
@@ -187,7 +158,6 @@ mod tests {
 
         assert_eq!(decoded.data().name, "hello");
         assert_eq!(decoded.data().value, 999);
-        assert_eq!(decoded.token(), Some("auth-123"));
         assert_eq!(
             decoded.meta().get("trace-id"),
             Some(b"trace-456".as_slice())

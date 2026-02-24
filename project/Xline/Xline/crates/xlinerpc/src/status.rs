@@ -4,8 +4,10 @@
 
 use std::{error::Error, fmt};
 
+use bytes::Bytes;
+
 /// RPC status representing success or various error conditions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     /// The gRPC status code
     code: Code,
@@ -149,7 +151,32 @@ impl Status {
         &self.message
     }
 
+    /// Create a new `Status` with the associated code, message, and details
+    /// TODO: add details support in the future.
+    #[must_use]
+    pub fn with_details(code: Code, message: impl Into<String>, _details: Bytes) -> Status {
+        // For now, we don't store details, just provide API compatibility
+        Status {
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// Get the details of this `Status`
+    ///
+    /// Returns empty bytes for now as details are not yet stored
+    #[must_use]
+    pub fn details(&self) -> &[u8] {
+        &[]
+    }
+
     // === Commonly-used constructor methods ===
+
+    /// Create a new `Status` representing a successful operation
+    #[must_use]
+    pub fn ok() -> Status {
+        Status::new(Code::Ok, "")
+    }
 
     /// The operation was cancelled (typically by the caller).
     #[must_use]

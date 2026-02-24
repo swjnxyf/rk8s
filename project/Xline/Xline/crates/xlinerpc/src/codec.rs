@@ -214,7 +214,6 @@ mod tests {
         };
 
         let mut meta = MetaData::new();
-        meta.set_token("token-123");
         meta.insert("trace-id", "trace-456");
 
         // Encode
@@ -227,7 +226,6 @@ mod tests {
 
         assert_eq!(decoded_msg.name, "test");
         assert_eq!(decoded_msg.value, 42);
-        assert_eq!(decoded_meta.token(), Some("token-123"));
         assert_eq!(decoded_meta.get("trace-id"), Some(b"trace-456".as_slice()));
     }
 

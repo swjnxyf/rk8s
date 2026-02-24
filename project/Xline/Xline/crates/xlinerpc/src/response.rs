@@ -37,15 +37,6 @@ impl<T: Message> Response<T> {
         }
     }
 
-    /// Create a new response with data and status metadata
-    #[must_use]
-    #[inline]
-    pub fn with_status<V: crate::IntoMetadataBytes>(data: T, status: V) -> Self {
-        let mut meta = MetaData::new();
-        meta.insert("status", status);
-        Self { data, meta }
-    }
-
     /// Get a reference to the data
     #[must_use]
     #[inline]
@@ -152,17 +143,6 @@ mod tests {
         assert_eq!(resp.data().code, 200);
         assert!(resp.meta().is_empty());
         assert_eq!(resp.status(), None);
-    }
-
-    #[test]
-    fn test_response_with_status() {
-        let msg = TestMessage {
-            result: "ok".to_string(),
-            code: 200,
-        };
-        let resp = Response::with_status(msg, "OK");
-
-        assert_eq!(resp.status(), Some("OK"));
     }
 
     #[test]

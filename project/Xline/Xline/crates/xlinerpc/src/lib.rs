@@ -142,18 +142,6 @@ impl MetaData {
         self.headers.remove(key.as_ref())
     }
 
-    /// Get the authentication token if present (as UTF-8 string)
-    #[must_use]
-    pub fn token(&self) -> Option<&str> {
-        self.get_str("authorization").and_then(Result::ok)
-    }
-
-    /// Set the authentication token
-    #[inline]
-    pub fn set_token<V: IntoMetadataBytes>(&mut self, token: V) {
-        self.insert("authorization", token);
-    }
-
     /// Get all headers as binary data
     #[must_use]
     #[inline]
@@ -225,15 +213,6 @@ mod tests {
         assert_eq!(meta.get("key"), Some(b"value".as_slice()));
         assert_eq!(meta.get_str("key"), Some(Ok("value")));
         assert_eq!(meta.len(), 1);
-    }
-
-    #[test]
-    fn test_metadata_token() {
-        let mut meta = MetaData::new();
-        assert_eq!(meta.token(), None);
-
-        meta.set_token("my-token");
-        assert_eq!(meta.token(), Some("my-token"));
     }
 
     #[test]

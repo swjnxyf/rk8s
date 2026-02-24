@@ -13,7 +13,6 @@
 
 - **`MetaData`** - 元数据容器，存储键值对（如认证令牌、追踪 ID 等）
   - 内部使用 `HashMap<Vec<u8>, Vec<u8>>` 支持二进制数据
-  - 提供便捷方法如 `token()`、`set_token()` 等
   - 限制最多 255 个条目，每个键/值最大 64KB
 
 - **`Request<T>`** - 请求包装器
@@ -55,9 +54,6 @@ Metadata 格式:
 ```rust
 use rpc::{Request, MetaData};
 use prost::Message;
-
-// 创建带有 token 的请求
-let request = Request::with_token(my_proto_message, "auth-token-123");
 
 // 创建带有自定义元数据的请求
 let mut meta = MetaData::new();
@@ -104,11 +100,6 @@ if let Some(value) = meta.get("key") {
 // 读取为 UTF-8 字符串
 if let Some(Ok(value)) = meta.get_str("key") {
     // value 是 &str
-}
-
-// 获取认证令牌
-if let Some(token) = meta.token() {
-    println!("Token: {}", token);
 }
 ```
 

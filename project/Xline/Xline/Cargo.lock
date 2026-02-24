@@ -4647,6 +4647,7 @@ dependencies = [
 name = "xlinerpc"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "prost",
  "thiserror 1.0.64",
 ]

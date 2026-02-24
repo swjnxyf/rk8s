@@ -10,7 +10,7 @@ use dashmap::DashMap;
 use event_listener::Event;
 use futures::future::Either;
 use tokio::time::timeout;
-use tonic::{Code, Status};
+use tonic::Status;
 use tracing::{debug, instrument};
 use xlineapi::{
     AuthInfo, ResponseWrapper,
@@ -279,7 +279,7 @@ impl Kv for KvServer {
 mod test {
     use super::*;
     use crate::rpc::{Request, RequestOp};
-
+    use tonic::Code;
     #[test]
     fn txn_check() {
         let txn_req = TxnRequest {
