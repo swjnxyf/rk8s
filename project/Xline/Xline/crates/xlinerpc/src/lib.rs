@@ -52,7 +52,7 @@ impl IntoMetadataBytes for Vec<u8> {
 
 /// Metadata for RPC requests and responses
 /// Similar to tonic::MetadataMap but uses binary data internally
-/// In fact,the entry number is usually less than ten,and the key/value size is usually less than 128 bytes.
+/// In fact, the entry number is usually less than ten, and the key/value size is usually less than 128 bytes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaData {
     /// Key-value pairs for metadata (both binary)
