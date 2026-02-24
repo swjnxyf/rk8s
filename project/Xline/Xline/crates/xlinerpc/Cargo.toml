@@ -7,3 +7,4 @@ edition.workspace = true
 bytes.workspace = true
 prost.workspace = true
 thiserror.workspace = true
+tonic = { workspace = true }

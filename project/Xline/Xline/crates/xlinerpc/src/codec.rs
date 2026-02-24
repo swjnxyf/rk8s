@@ -78,21 +78,22 @@ impl BinaryCodec {
     fn encode_metadata(meta: &MetaData) -> Vec<u8> {
         let mut bytes = Vec::new();
 
-        // Write count (max 255 entries)
-        let count = meta.len().min(255) as u8;
+        // `MetaData::insert` enforces len <= 255, so the cast is always exact.
+        let count = meta.len() as u8;
         bytes.push(count);
 
-        // Write each key-value pair
-        for (key, value) in meta.headers().iter().take(255) {
+        // Write each key-value pair.
+        // `MetaData::insert` enforces key/value len <= u16::MAX, so casts are exact.
+        for (key, value) in meta.iter() {
             // Write key length and key
-            let key_len = key.len().min(u16::MAX as usize) as u16;
+            let key_len = key.len() as u16;
             bytes.extend_from_slice(&key_len.to_be_bytes());
-            bytes.extend_from_slice(&key[..key_len as usize]);
+            bytes.extend_from_slice(key);
 
             // Write value length and value
-            let value_len = value.len().min(u16::MAX as usize) as u16;
+            let value_len = value.len() as u16;
             bytes.extend_from_slice(&value_len.to_be_bytes());
-            bytes.extend_from_slice(&value[..value_len as usize]);
+            bytes.extend_from_slice(value);
         }
 
         bytes

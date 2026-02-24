@@ -13,6 +13,8 @@ pub struct Status {
     code: Code,
     /// Error message
     message: String,
+    /// Binary details payload (e.g. protobuf-encoded error wrapper)
+    details: Bytes,
 }
 
 /// gRPC status codes
@@ -136,6 +138,7 @@ impl Status {
         Status {
             code,
             message: message.into(),
+            details: Bytes::new(),
         }
     }
 
@@ -151,23 +154,20 @@ impl Status {
         &self.message
     }
 
-    /// Create a new `Status` with the associated code, message, and details
-    /// TODO: add details support in the future.
+    /// Create a new `Status` with the associated code, message, and binary details payload
     #[must_use]
-    pub fn with_details(code: Code, message: impl Into<String>, _details: Bytes) -> Status {
-        // For now, we don't store details, just provide API compatibility
+    pub fn with_details(code: Code, message: impl Into<String>, details: Bytes) -> Status {
         Status {
             code,
             message: message.into(),
+            details,
         }
     }
 
-    /// Get the details of this `Status`
-    ///
-    /// Returns empty bytes for now as details are not yet stored
+    /// Get the binary details payload of this `Status`
     #[must_use]
     pub fn details(&self) -> &[u8] {
-        &[]
+        &self.details
     }
 
     // === Commonly-used constructor methods ===
@@ -214,10 +214,34 @@ impl Status {
         Status::new(Code::AlreadyExists, message)
     }
 
+    /// The caller does not have permission to execute the specified operation.
+    #[must_use]
+    pub fn permission_denied(message: impl Into<String>) -> Status {
+        Status::new(Code::PermissionDenied, message)
+    }
+
+    /// Some resource has been exhausted (e.g., per-user quota, disk space).
+    #[must_use]
+    pub fn resource_exhausted(message: impl Into<String>) -> Status {
+        Status::new(Code::ResourceExhausted, message)
+    }
+
     /// Operation was rejected because the system is not in a state required for execution.
     #[must_use]
     pub fn failed_precondition(message: impl Into<String>) -> Status {
         Status::new(Code::FailedPrecondition, message)
+    }
+
+    /// The operation was aborted, typically due to a concurrency issue.
+    #[must_use]
+    pub fn aborted(message: impl Into<String>) -> Status {
+        Status::new(Code::Aborted, message)
+    }
+
+    /// Operation was attempted past the valid range.
+    #[must_use]
+    pub fn out_of_range(message: impl Into<String>) -> Status {
+        Status::new(Code::OutOfRange, message)
     }
 
     /// Operation is not implemented or not supported/enabled in this service.
@@ -237,15 +261,48 @@ impl Status {
     pub fn unavailable(message: impl Into<String>) -> Status {
         Status::new(Code::Unavailable, message)
     }
+
+    /// Unrecoverable data loss or corruption.
+    #[must_use]
+    pub fn data_loss(message: impl Into<String>) -> Status {
+        Status::new(Code::DataLoss, message)
+    }
+
+    /// The request does not have valid authentication credentials.
+    #[must_use]
+    pub fn unauthenticated(message: impl Into<String>) -> Status {
+        Status::new(Code::Unauthenticated, message)
+    }
 }
 
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "status: {:?}, message: {:?}", self.code, self.message)
+        write!(f, "status: {}, message: {}", self.code, self.message)
     }
 }
 
 impl Error for Status {}
+
+// TODO: remove this after curp and xline-api build without tonic.
+// Conversion from tonic::Status
+impl From<tonic::Status> for Status {
+    fn from(s: tonic::Status) -> Self {
+        let code = Code::from_i32(s.code() as i32);
+        let details = bytes::Bytes::copy_from_slice(s.details());
+        Status::with_details(code, s.message(), details)
+    }
+}
+
+impl From<Status> for tonic::Status {
+    fn from(s: Status) -> Self {
+        let code = tonic::Code::from(s.code as i32);
+        if s.details.is_empty() {
+            tonic::Status::new(code, s.message)
+        } else {
+            tonic::Status::with_details(code, s.message, s.details)
+        }
+    }
+}
 
 // Conversion from std::io::Error
 impl From<std::io::Error> for Status {

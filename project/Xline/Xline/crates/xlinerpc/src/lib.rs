@@ -2,15 +2,19 @@
 //!
 //! Provides Request/Response wrappers with metadata support and binary encoding.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub mod codec;
+pub mod envelope;
 pub mod request;
 pub mod response;
 pub mod status;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
+pub use envelope::Envelope;
+pub use request::Request;
+pub use response::Response;
 pub use status::{Code, Status};
 
 /// Trait for types that can be converted into metadata bytes (keys or values)
@@ -53,10 +57,11 @@ impl IntoMetadataBytes for Vec<u8> {
 /// Metadata for RPC requests and responses
 /// Similar to tonic::MetadataMap but uses binary data internally
 /// In fact, the entry number is usually less than ten, and the key/value size is usually less than 128 bytes.
+/// Uses `BTreeMap` internally to guarantee deterministic iteration order during encoding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetaData {
     /// Key-value pairs for metadata (both binary)
-    headers: HashMap<Vec<u8>, Vec<u8>>,
+    headers: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 impl MetaData {
@@ -65,7 +70,7 @@ impl MetaData {
     #[inline]
     pub fn new() -> Self {
         Self {
-            headers: HashMap::new(),
+            headers: BTreeMap::new(),
         }
     }
 
@@ -85,12 +90,17 @@ impl MetaData {
         meta
     }
 
-    /// Insert a key-value pair
-    /// In real use, it will never panic as entry number is usually less than ten.
-    /// And key/value size is usually less than 128 bytes.
-    /// - Key exceeds 65535 bytes (u16::MAX)
-    /// - Value exceeds 65535 bytes (u16::MAX)
-    /// - Total entries would exceed 255 (u8::MAX)
+    /// Insert a key-value pair.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any of the following preconditions are violated:
+    /// - Key exceeds 65535 bytes (`u16::MAX`)
+    /// - Value exceeds 65535 bytes (`u16::MAX`)
+    /// - Total entries would exceed 255 (`u8::MAX`)
+    ///
+    /// In practice these limits are never reached: metadata carries only a
+    /// handful of short RPC header fields.
     #[inline]
     pub fn insert<K, V>(&mut self, key: K, value: V)
     where
@@ -142,13 +152,6 @@ impl MetaData {
         self.headers.remove(key.as_ref())
     }
 
-    /// Get all headers as binary data
-    #[must_use]
-    #[inline]
-    pub fn headers(&self) -> &HashMap<Vec<u8>, Vec<u8>> {
-        &self.headers
-    }
-
     /// Check if metadata is empty
     #[must_use]
     #[inline]
@@ -164,22 +167,12 @@ impl MetaData {
     }
 
     /// Iterate over all entries as byte slices
+    ///
+    /// Iteration order is deterministic (sorted by key) due to `BTreeMap` storage.
     pub fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> {
         self.headers
             .iter()
             .map(|(k, v)| (k.as_slice(), v.as_slice()))
-    }
-}
-
-impl From<HashMap<Vec<u8>, Vec<u8>>> for MetaData {
-    fn from(headers: HashMap<Vec<u8>, Vec<u8>>) -> Self {
-        Self { headers }
-    }
-}
-
-impl From<MetaData> for HashMap<Vec<u8>, Vec<u8>> {
-    fn from(meta: MetaData) -> Self {
-        meta.headers
     }
 }
 
@@ -225,20 +218,6 @@ mod tests {
         assert_eq!(removed, Some(b"value".to_vec()));
         assert_eq!(meta.len(), 0);
         assert!(meta.is_empty());
-    }
-
-    #[test]
-    fn test_metadata_from_hashmap() {
-        let mut map = HashMap::new();
-        map.insert(b"k1".to_vec(), b"v1".to_vec());
-        map.insert(b"k2".to_vec(), b"v2".to_vec());
-
-        let meta = MetaData::from(map.clone());
-        assert_eq!(meta.len(), 2);
-        assert_eq!(meta.get("k1"), Some(b"v1".as_slice()));
-
-        let map2: HashMap<Vec<u8>, Vec<u8>> = meta.into();
-        assert_eq!(map2.len(), 2);
     }
 
     #[test]

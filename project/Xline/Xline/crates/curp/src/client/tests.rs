@@ -769,8 +769,7 @@ impl ConnectApi for MockedStreamConnectApi {
         _request: ProposeRequest,
         _token: Option<String>,
         _timeout: Duration,
-    ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send>, CurpError>
-    {
+    ) -> Result<Box<dyn Stream<Item = Result<OpResponse, CurpError>> + Send>, CurpError> {
         unreachable!("please use MockedConnectApi")
     }
 
@@ -784,10 +783,7 @@ impl ConnectApi for MockedStreamConnectApi {
     }
 
     /// Send `ReadIndexRequest`
-    async fn read_index(
-        &self,
-        _timeout: Duration,
-    ) -> Result<ReadIndexResponse, CurpError> {
+    async fn read_index(&self, _timeout: Duration) -> Result<ReadIndexResponse, CurpError> {
         unreachable!("please use MockedConnectApi")
     }
 

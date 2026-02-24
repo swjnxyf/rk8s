@@ -424,7 +424,6 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> Rpc<C, CE, RC> {
     }
 }
 
-
 // QUIC transport service trait implementations
 #[cfg(feature = "quic")]
 mod quic_service_impl {
@@ -443,7 +442,7 @@ mod quic_service_impl {
             InstallSnapshotRequest, InstallSnapshotResponse, LeaseKeepAliveMsg, Metadata,
             MoveLeaderRequest, MoveLeaderResponse, OpResponse, ProposeConfChangeRequest,
             ProposeConfChangeResponse, ProposeRequest, PublishRequest, PublishResponse,
-            RecordRequest, RecordResponse, ReadIndexResponse, ShutdownRequest, ShutdownResponse,
+            ReadIndexResponse, RecordRequest, RecordResponse, ShutdownRequest, ShutdownResponse,
             VoteRequest, VoteResponse,
         },
     };
@@ -562,7 +561,9 @@ mod quic_service_impl {
 
         async fn install_snapshot(
             &self,
-            stream: Box<dyn Stream<Item = Result<InstallSnapshotRequest, CurpError>> + Send + Unpin>,
+            stream: Box<
+                dyn Stream<Item = Result<InstallSnapshotRequest, CurpError>> + Send + Unpin,
+            >,
         ) -> Result<InstallSnapshotResponse, CurpError> {
             // Convert CurpError stream to tonic::Status stream for inner implementation
             let tonic_stream = stream.map(|r| r.map_err(|e| tonic::Status::from(e)));
@@ -580,7 +581,8 @@ mod quic_service_impl {
 
         async fn try_become_leader_now(&self) -> Result<(), CurpError> {
             use crate::rpc::TryBecomeLeaderNowRequest;
-            let _ = self.inner
+            let _ = self
+                .inner
                 .try_become_leader_now(&TryBecomeLeaderNowRequest {})
                 .await
                 .map_err(CurpError::from)?;

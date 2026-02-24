@@ -1070,9 +1070,7 @@ impl<C: Command, CE: CommandExecutor<C>, RC: RoleChange> CurpNode<C, CE, RC> {
             debug!("{} send append_entries to {}", curp.id(), connect.id());
         }
 
-        let resp = connect
-            .append_entries(req, curp.cfg().rpc_timeout)
-            .await?;
+        let resp = connect.append_entries(req, curp.cfg().rpc_timeout).await?;
 
         let Ok(ae_succeed) = curp.handle_append_entries_resp(
             connect.id(),
@@ -1287,9 +1285,7 @@ mod tests {
 
         let mut mock_connect1 = MockInnerConnectApi::default();
         mock_connect1.expect_vote().returning(|req, _| {
-            Ok(
-                VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap(),
-            )
+            Ok(VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap())
         });
         let s1_id = curp.cluster().get_id_by_name("S1").unwrap();
         mock_connect1.expect_id().return_const(s1_id);
@@ -1300,9 +1296,7 @@ mod tests {
 
         let mut mock_connect2 = MockInnerConnectApi::default();
         mock_connect2.expect_vote().returning(|req, _| {
-            Ok(
-                VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap(),
-            )
+            Ok(VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap())
         });
         let s2_id = curp.cluster().get_id_by_name("S2").unwrap();
         mock_connect2.expect_id().return_const(s2_id);
@@ -1344,9 +1338,7 @@ mod tests {
 
         let mut mock_connect1 = MockInnerConnectApi::default();
         mock_connect1.expect_vote().returning(|req, _| {
-            Ok(
-                VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap(),
-            )
+            Ok(VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap())
         });
         mock_connect1.expect_id().return_const(s1_id);
         curp.set_connect(
@@ -1356,9 +1348,7 @@ mod tests {
 
         let mut mock_connect2 = MockInnerConnectApi::default();
         mock_connect2.expect_vote().returning(|req, _| {
-            Ok(
-                VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap(),
-            )
+            Ok(VoteResponse::new_accept::<TestCommand>(req.term, vec![]).unwrap())
         });
         mock_connect2.expect_id().return_const(s2_id);
         curp.set_connect(

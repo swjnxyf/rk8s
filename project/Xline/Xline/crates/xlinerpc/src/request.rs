@@ -1,120 +1,24 @@
-//! Request types for RPC communication
+//! Request type for RPC communication
 
-use prost::Message;
+use crate::envelope::Envelope;
 
-use crate::{
-    MetaData,
-    codec::{BinaryCodec, Codec, DecodeError, EncodeError},
-};
+/// Marker type that distinguishes a request envelope from a response envelope.
+pub struct RequestKind;
 
-/// Generic RPC request wrapper
+/// Generic RPC request wrapper.
 ///
-/// Separates metadata (headers, auth tokens) from the actual request data.
-/// T should be a protobuf Message type, and usually as RequestWrapper.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Request<T: Message> {
-    /// The actual request data
-    data: T,
-    /// Metadata (headers, tokens, etc.)
-    meta: MetaData,
-}
-
-impl<T: Message> Request<T> {
-    /// Create a new request with data and metadata
-    #[must_use]
-    #[inline]
-    pub fn new(data: T, meta: MetaData) -> Self {
-        Self { data, meta }
-    }
-
-    /// Create a new request with only data (empty metadata)
-    #[must_use]
-    #[inline]
-    pub fn from_data(data: T) -> Self {
-        Self {
-            data,
-            meta: MetaData::new(),
-        }
-    }
-
-    /// Get a reference to the data
-    #[must_use]
-    #[inline]
-    pub fn data(&self) -> &T {
-        &self.data
-    }
-
-    /// Get a mutable reference to the data
-    #[inline]
-    pub fn data_mut(&mut self) -> &mut T {
-        &mut self.data
-    }
-
-    /// Get a reference to the metadata
-    #[must_use]
-    #[inline]
-    pub fn meta(&self) -> &MetaData {
-        &self.meta
-    }
-
-    /// Get a mutable reference to the metadata
-    #[inline]
-    pub fn meta_mut(&mut self) -> &mut MetaData {
-        &mut self.meta
-    }
-
-    /// Decompose into data and metadata
-    #[must_use]
-    #[inline]
-    pub fn into_parts(self) -> (T, MetaData) {
-        (self.data, self.meta)
-    }
-
-    /// Encode the request to bytes using the default BinaryCodec
-    ///
-    /// # Errors
-    /// Returns error if encoding fails
-    #[inline]
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, EncodeError> {
-        self.encode_with(&BinaryCodec)
-    }
-
-    /// Encode the request to bytes using a custom codec
-    ///
-    /// # Errors
-    /// Returns error if encoding fails
-    pub fn encode_with<C: Codec>(&self, codec: &C) -> Result<Vec<u8>, EncodeError> {
-        codec.encode(&self.data, &self.meta)
-    }
-
-    /// Decode a request from bytes using the default BinaryCodec
-    ///
-    /// # Errors
-    /// Returns error if decoding fails
-    #[inline]
-    pub fn decode_from_slice(bytes: &[u8]) -> Result<Self, DecodeError>
-    where
-        T: Default,
-    {
-        Self::decode_with(bytes, &BinaryCodec)
-    }
-
-    /// Decode a request from bytes using a custom codec
-    ///
-    /// # Errors
-    /// Returns error if decoding fails
-    pub fn decode_with<C: Codec>(bytes: &[u8], codec: &C) -> Result<Self, DecodeError>
-    where
-        T: Default,
-    {
-        let (data, meta) = codec.decode(bytes)?;
-        Ok(Self { data, meta })
-    }
-}
+/// Carries a protobuf payload together with binary metadata (auth tokens, trace
+/// IDs, …).  All shared logic lives in [`Envelope`]; this type alias exists
+/// solely to give callers a meaningful name and type-level distinction from
+/// [`crate::Response`].
+pub type Request<T> = Envelope<T, RequestKind>;
 
 #[cfg(test)]
 mod tests {
+    use prost::Message;
+
     use super::*;
+    use crate::{BinaryCodec, MetaData};
 
     #[derive(Clone, PartialEq, Message)]
     struct TestMessage {
@@ -130,7 +34,7 @@ mod tests {
             name: "test".to_string(),
             value: 42,
         };
-        let req = Request::from_data(msg.clone());
+        let req = Request::from_data(msg);
 
         assert_eq!(req.data().name, "test");
         assert_eq!(req.data().value, 42);
@@ -149,11 +53,9 @@ mod tests {
 
         let request = Request::new(msg, meta);
 
-        // Encode
         let encoded = request.encode_to_vec().expect("encode failed");
         assert!(!encoded.is_empty());
 
-        // Decode
         let decoded = Request::<TestMessage>::decode_from_slice(&encoded).expect("decode failed");
 
         assert_eq!(decoded.data().name, "hello");

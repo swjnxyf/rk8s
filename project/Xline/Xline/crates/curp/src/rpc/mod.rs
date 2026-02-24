@@ -251,10 +251,8 @@ pub(crate) trait CurpService: Send + Sync + 'static {
 #[async_trait]
 pub(crate) trait InnerCurpService: Send + Sync + 'static {
     /// Handle append entries request
-    fn append_entries(
-        &self,
-        req: AppendEntriesRequest,
-    ) -> Result<AppendEntriesResponse, CurpError>;
+    fn append_entries(&self, req: AppendEntriesRequest)
+    -> Result<AppendEntriesResponse, CurpError>;
 
     /// Handle vote request
     fn vote(&self, req: VoteRequest) -> Result<VoteResponse, CurpError>;

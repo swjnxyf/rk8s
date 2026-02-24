@@ -116,10 +116,7 @@ impl<C: ConnectApi> ConnectApi for Reconnect<C> {
     }
 
     /// Send `ReadIndexRequest`
-    async fn read_index(
-        &self,
-        timeout: Duration,
-    ) -> Result<ReadIndexResponse, CurpError> {
+    async fn read_index(&self, timeout: Duration) -> Result<ReadIndexResponse, CurpError> {
         execute_with_reconnect!(self, ConnectApi::read_index, timeout)
     }
 

@@ -4650,6 +4650,7 @@ dependencies = [
  "bytes",
  "prost",
  "thiserror 1.0.64",
+ "tonic",
 ]
 
 [[package]]
