@@ -47,7 +47,6 @@ use crate::{
         AuthenticateResponse, DeleteRangeRequest, LeaseRevokeRequest, Permission, PutRequest,
         RangeRequest, Request, RequestOp, RequestWrapper, Role, TxnRequest, Type, User,
     },
-    server::get_token,
     storage::{
         auth_store::backend::AuthStoreBackend,
         db::{DB, WriteOp},
@@ -126,29 +125,6 @@ impl AuthStore {
                 .map_err(|_ignore| ExecuteError::InvalidAuthToken),
             None => Err(ExecuteError::TokenManagerNotInit),
         }
-    }
-
-    /// Try get auth info from tonic request
-    #[allow(clippy::result_large_err)]
-    pub(crate) fn try_get_auth_info_from_request<T>(
-        &self,
-        request: &tonic::Request<T>,
-    ) -> Result<Option<AuthInfo>, Status> {
-        if !self.is_enabled() {
-            return Ok(None);
-        }
-        if let Some(token) = get_token(request.metadata()) {
-            let auth_info = self.verify(&token)?;
-            return Ok(Some(auth_info));
-        }
-        if let Some(cn) = get_cn(request) {
-            let auth_info = AuthInfo {
-                username: cn,
-                auth_revision: self.revision(),
-            };
-            return Ok(Some(auth_info));
-        }
-        Ok(None)
     }
 
     /// Try get auth info from xlinerpc request.
@@ -1208,14 +1184,6 @@ impl AuthStore {
     pub(crate) fn revision_gen(&self) -> Arc<RevisionNumberGenerator> {
         Arc::clone(&self.revision)
     }
-}
-
-/// Get common name from tonic request
-fn get_cn<T>(request: &tonic::Request<T>) -> Option<String> {
-    let chain = request.peer_certs()?;
-    let cert_der = chain.first()?;
-    let cert = x509_certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
-    cert.subject_common_name()
 }
 
 #[cfg(test)]

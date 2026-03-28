@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tonic::metadata::MetadataMap;
 use tracing::debug;
 use utils::hash_password;
 use xlinerpc::Status;
@@ -36,14 +35,6 @@ pub(crate) struct AuthServer {
     client: Arc<CurpClient>,
     /// Auth Store
     auth_store: Arc<AuthStore>,
-}
-
-/// Get token from metadata
-pub(crate) fn get_token(metadata: &MetadataMap) -> Option<String> {
-    metadata
-        .get("token")
-        .or_else(|| metadata.get("authorization"))
-        .and_then(|v| v.to_str().map(String::from).ok())
 }
 
 impl AuthServer {
