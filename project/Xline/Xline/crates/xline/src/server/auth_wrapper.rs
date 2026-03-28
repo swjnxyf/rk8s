@@ -35,6 +35,19 @@ pub(crate) fn metadata_from_tonic(map: &tonic::metadata::MetadataMap) -> Metadat
     Metadata::from_pairs(pairs)
 }
 
+/// Build transport-agnostic `Metadata` from `xlinerpc::MetaData`
+pub(crate) fn metadata_from_rpc(map: &xlinerpc::MetaData) -> Metadata {
+    let pairs = map
+        .iter()
+        .filter_map(|(k, v)| {
+            let key = std::str::from_utf8(k).ok()?;
+            let value = std::str::from_utf8(v).ok()?;
+            Some((key.to_owned(), value.to_owned()))
+        })
+        .collect();
+    Metadata::from_pairs(pairs)
+}
+
 /// Convert `CurpError` → `tonic::Status` via `xlinerpc::Status`
 pub(crate) fn curp_error_to_tonic_status(err: CurpError) -> Status {
     let xlinerpc_status: xlinerpc::status::Status = err.into();
@@ -314,62 +327,108 @@ impl Server {
         RouterEndpoint::new(self.server)
             .add_server_streaming_fn(
                 "/ProposeStream",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeRequest>| async move {
-                    Protocol::propose_stream(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<ProposeRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    let mut req = request.into_inner();
+                    this.inject_auth_from_token(&mut req, meta.token())?;
+                    let stream = CurpService::propose_stream(&*this, req, meta)
+                        .await
+                        .map_err(xlinerpc::Status::from)?;
+                    let mapped = stream.map(|r| r.map_err(xlinerpc::Status::from));
+                    Ok(xlinerpc::Response::from_data(Box::pin(mapped)))
                 },
             )
             .add_unary_fn(
                 "/Record",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<RecordRequest>| async move {
-                    Protocol::record(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<RecordRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::record(&*this, request.into_inner(), meta)
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/ReadIndex",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ReadIndexRequest>| async move {
-                    Protocol::read_index(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<ReadIndexRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::read_index(&*this, meta).map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/ProposeConfChange",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ProposeConfChangeRequest>| async move {
-                    Protocol::propose_conf_change(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<ProposeConfChangeRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::propose_conf_change(&*this, request.into_inner(), meta)
+                            .await
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/Publish",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<PublishRequest>| async move {
-                    Protocol::publish(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<PublishRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::publish(&*this, request.into_inner(), meta)
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 }
             )
             .add_unary_fn(
                 "/Shutdown",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<ShutdownRequest>| async move {
-                    Protocol::shutdown(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<ShutdownRequest>| async move {
+                    let meta = metadata_from_rpc(request.metadata());
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::shutdown(&*this, request.into_inner(), meta)
+                            .await
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/FetchCluster",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchClusterRequest>| async move {
-                    Protocol::fetch_cluster(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<FetchClusterRequest>| async move {
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::fetch_cluster(&*this, request.into_inner())
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/FetchReadState",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<FetchReadStateRequest>| async move {
-                    Protocol::fetch_read_state(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<FetchReadStateRequest>| async move {
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::fetch_read_state(&*this, request.into_inner())
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_unary_fn(
                 "/MoveLeader",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<MoveLeaderRequest>| async move {
-                    Protocol::move_leader(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<MoveLeaderRequest>| async move {
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::move_leader(&*this, request.into_inner())
+                            .await
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<AuthWrapper>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
-                    Protocol::lease_keep_alive(&*this, request).await
+                move |this: Arc<AuthWrapper>, request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                    let stream = request.into_inner();
+                    let curp_stream: Box<
+                        dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
+                    > = Box::new(stream.map(|r| r.map_err(CurpError::from)));
+                    Ok(xlinerpc::Response::from_data(
+                        CurpService::lease_keep_alive(&*this, curp_stream)
+                            .await
+                            .map_err(xlinerpc::Status::from)?,
+                    ))
                 },
             )
     }

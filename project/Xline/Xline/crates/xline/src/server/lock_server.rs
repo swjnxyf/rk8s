@@ -3,7 +3,6 @@ use std::sync::Arc;
 use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
 use http::uri::PathAndQuery;
-use tonic::Status;
 use tonic::client::Grpc;
 use tonic::codec::ProstCodec;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
@@ -14,6 +13,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -220,10 +220,12 @@ impl LockServer {
     /// lease associate with the owner expires.
     async fn lock(
         &self,
-        request: tonic::Request<LockRequest>,
-    ) -> Result<tonic::Response<LockResponse>, Status> {
+        request: xlinerpc::Request<LockRequest>,
+    ) -> Result<xlinerpc::Response<LockResponse>, Status> {
         debug!("Receive LockRequest {:?}", request);
-        let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
+        let auth_info = self
+            .auth_store
+            .try_get_auth_info_from_rpc_request(&request)?;
         let lock_req = request.into_inner();
         let lease_id = if lock_req.lease == 0 {
             self.lease_grant(auth_info.clone()).await?
@@ -286,7 +288,7 @@ impl LockServer {
             header,
             key: key.into_bytes(),
         };
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// Unlock takes a key returned by Lock and releases the hold on lock. The
@@ -294,12 +296,14 @@ impl LockServer {
     /// ownership of the lock.
     async fn unlock(
         &self,
-        request: tonic::Request<UnlockRequest>,
-    ) -> Result<tonic::Response<UnlockResponse>, Status> {
+        request: xlinerpc::Request<UnlockRequest>,
+    ) -> Result<xlinerpc::Response<UnlockResponse>, Status> {
         debug!("Receive UnlockRequest {:?}", request);
-        let auth_info = self.auth_store.try_get_auth_info_from_request(&request)?;
+        let auth_info = self
+            .auth_store
+            .try_get_auth_info_from_rpc_request(&request)?;
         let header = self.delete_key(&request.get_ref().key, auth_info).await?;
-        Ok(tonic::Response::new(UnlockResponse { header }))
+        Ok(xlinerpc::Response::from_data(UnlockResponse { header }))
     }
 }
 
@@ -316,13 +320,13 @@ impl Server {
         RouterEndpoint::new(self.lock_server)
             .add_unary_fn(
                 "/Lock",
-                move |this: Arc<LockServer>, request: tonic::Request<LockRequest>| async move {
+                move |this: Arc<LockServer>, request: xlinerpc::Request<LockRequest>| async move {
                     this.lock(request).await
                 },
             )
             .add_unary_fn(
                 "/Unlock",
-                move |this: Arc<LockServer>, request: tonic::Request<UnlockRequest>| async move {
+                move |this: Arc<LockServer>, request: xlinerpc::Request<UnlockRequest>| async move {
                     this.unlock(request).await
                 },
             )

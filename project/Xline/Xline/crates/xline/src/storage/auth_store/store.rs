@@ -151,6 +151,30 @@ impl AuthStore {
         Ok(None)
     }
 
+    /// Try get auth info from xlinerpc request.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn try_get_auth_info_from_rpc_request<T>(
+        &self,
+        request: &xlinerpc::Request<T>,
+    ) -> Result<Option<AuthInfo>, Status> {
+        if !self.is_enabled() {
+            return Ok(None);
+        }
+
+        let token = request
+            .metadata()
+            .get(b"token")
+            .or_else(|| request.metadata().get(b"authorization"))
+            .and_then(|v| std::str::from_utf8(v).ok());
+
+        if let Some(token) = token {
+            let auth_info = self.verify(token)?;
+            return Ok(Some(auth_info));
+        }
+
+        Ok(None)
+    }
+
     /// Try get auth info from an optional token string
     ///
     /// Used by `CurpService` implementations where only token-based auth is available

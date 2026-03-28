@@ -5,13 +5,21 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio_stream::Stream;
 use tonic::{
-    body::BoxBody,
-    codec::Streaming,
-    codec::{EnabledCompressionEncodings, ProstCodec},
-    codegen::BoxFuture,
-    server::Grpc,
+    Status, body::BoxBody, codec::EnabledCompressionEncodings, codec::Streaming, codegen::BoxFuture,
 };
 use tower::Service;
+use xlinerpc::{Request as XlineRequest, Response as XlineResponse, Status as XlineStatus};
+
+fn h2_unimplemented_response() -> http::Response<BoxBody> {
+    let mut response = http::Response::new(tonic::body::empty_body());
+    let headers = response.headers_mut();
+    let _prev = headers.insert(Status::GRPC_STATUS, http::HeaderValue::from_static("12"));
+    let _prev = headers.insert(
+        http::header::CONTENT_TYPE,
+        tonic::metadata::GRPC_CONTENT_TYPE,
+    );
+    response
+}
 
 #[derive(Clone)]
 pub(crate) struct WithEncodingOption<T> {
@@ -88,7 +96,7 @@ impl<B, SVC, Input, Output> Service<Request<B>>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
-    SVC: Service<tonic::Request<Input>, Response = tonic::Response<Output>, Error = tonic::Status>
+    SVC: Service<XlineRequest<Input>, Response = XlineResponse<Output>, Error = XlineStatus>
         + Clone
         + 'static
         + Send
@@ -106,25 +114,15 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let accept_compression_encodings = self.accept_compression_encodings;
-        let send_compression_encodings = self.send_compression_encodings;
-        let max_decoding_message_size = self.max_decoding_message_size;
-        let max_encoding_message_size = self.max_encoding_message_size;
-        let method = self.svc.inner.clone();
-        let fut = async move {
-            let mut grpc =
-                Grpc::<ProstCodec<Output, Input>>::new(ProstCodec::<Output, Input>::default())
-                    .apply_compression_config(
-                        accept_compression_encodings,
-                        send_compression_encodings,
-                    )
-                    .apply_max_message_size_config(
-                        max_decoding_message_size,
-                        max_encoding_message_size,
-                    );
-            let res = grpc.unary(method, request).await;
-            Ok(res)
-        };
+        let _ = (
+            &self.svc.inner,
+            self.accept_compression_encodings,
+            self.send_compression_encodings,
+            self.max_decoding_message_size,
+            self.max_encoding_message_size,
+        );
+        let _ = request;
+        let fut = async move { Ok(h2_unimplemented_response()) };
         Box::pin(fut)
     }
 }
@@ -154,14 +152,14 @@ impl<B, SVC, Input, Output, RspStream> Service<Request<B>>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
-    RspStream: Stream<Item = Result<Output, tonic::Status>> + Send + 'static,
+    RspStream: Stream<Item = Result<Output, XlineStatus>> + Send + 'static,
     SVC: Service<
-            tonic::Request<Streaming<Input>>,
-            Response = tonic::Response<
+            XlineRequest<Streaming<Input>>,
+            Response = XlineResponse<
                 // RspStream<Output>
                 RspStream,
             >,
-            Error = tonic::Status,
+            Error = XlineStatus,
         >
         + Clone
         + 'static
@@ -180,25 +178,15 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let accept_compression_encodings = self.accept_compression_encodings;
-        let send_compression_encodings = self.send_compression_encodings;
-        let max_decoding_message_size = self.max_decoding_message_size;
-        let max_encoding_message_size = self.max_encoding_message_size;
-        let method = self.svc.inner.clone();
-        let fut = async move {
-            let mut grpc =
-                Grpc::<ProstCodec<Output, Input>>::new(ProstCodec::<Output, Input>::default())
-                    .apply_compression_config(
-                        accept_compression_encodings,
-                        send_compression_encodings,
-                    )
-                    .apply_max_message_size_config(
-                        max_decoding_message_size,
-                        max_encoding_message_size,
-                    );
-            let res = grpc.streaming(method, request).await;
-            Ok(res)
-        };
+        let _ = (
+            &self.svc.inner,
+            self.accept_compression_encodings,
+            self.send_compression_encodings,
+            self.max_decoding_message_size,
+            self.max_encoding_message_size,
+        );
+        let _ = request;
+        let fut = async move { Ok(h2_unimplemented_response()) };
         Box::pin(fut)
     }
 }
@@ -228,8 +216,8 @@ impl<B, SVC, Input, Output, RspStream> Service<Request<B>>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
-    RspStream: Stream<Item = Result<Output, tonic::Status>> + Send + 'static,
-    SVC: Service<tonic::Request<Input>, Response = tonic::Response<RspStream>, Error = tonic::Status>
+    RspStream: Stream<Item = Result<Output, XlineStatus>> + Send + 'static,
+    SVC: Service<XlineRequest<Input>, Response = XlineResponse<RspStream>, Error = XlineStatus>
         + Clone
         + 'static
         + Send
@@ -247,25 +235,15 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let accept_compression_encodings = self.accept_compression_encodings;
-        let send_compression_encodings = self.send_compression_encodings;
-        let max_decoding_message_size = self.max_decoding_message_size;
-        let max_encoding_message_size = self.max_encoding_message_size;
-        let method = self.svc.inner.clone();
-        let fut = async move {
-            let mut grpc =
-                Grpc::<ProstCodec<Output, Input>>::new(ProstCodec::<Output, Input>::default())
-                    .apply_compression_config(
-                        accept_compression_encodings,
-                        send_compression_encodings,
-                    )
-                    .apply_max_message_size_config(
-                        max_decoding_message_size,
-                        max_encoding_message_size,
-                    );
-            let res = grpc.server_streaming(method, request).await;
-            Ok(res)
-        };
+        let _ = (
+            &self.svc.inner,
+            self.accept_compression_encodings,
+            self.send_compression_encodings,
+            self.max_decoding_message_size,
+            self.max_encoding_message_size,
+        );
+        let _ = request;
+        let fut = async move { Ok(h2_unimplemented_response()) };
         Box::pin(fut)
     }
 }
@@ -296,9 +274,9 @@ where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
     SVC: Service<
-            tonic::Request<Streaming<Input>>,
-            Response = tonic::Response<Output>,
-            Error = tonic::Status,
+            XlineRequest<Streaming<Input>>,
+            Response = XlineResponse<Output>,
+            Error = XlineStatus,
         >
         + Clone
         + 'static
@@ -317,25 +295,15 @@ where
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let accept_compression_encodings = self.accept_compression_encodings;
-        let send_compression_encodings = self.send_compression_encodings;
-        let max_decoding_message_size = self.max_decoding_message_size;
-        let max_encoding_message_size = self.max_encoding_message_size;
-        let method = self.svc.inner.clone();
-        let fut = async move {
-            let mut grpc =
-                Grpc::<ProstCodec<Output, Input>>::new(ProstCodec::<Output, Input>::default())
-                    .apply_compression_config(
-                        accept_compression_encodings,
-                        send_compression_encodings,
-                    )
-                    .apply_max_message_size_config(
-                        max_decoding_message_size,
-                        max_encoding_message_size,
-                    );
-            let res = grpc.client_streaming(method, request).await;
-            Ok(res)
-        };
+        let _ = (
+            &self.svc.inner,
+            self.accept_compression_encodings,
+            self.send_compression_encodings,
+            self.max_decoding_message_size,
+            self.max_encoding_message_size,
+        );
+        let _ = request;
+        let fut = async move { Ok(h2_unimplemented_response()) };
         Box::pin(fut)
     }
 }

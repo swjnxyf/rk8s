@@ -6,7 +6,6 @@ use curp::members::ClusterInfo;
 use futures::{StreamExt, stream::Stream};
 use http::uri::PathAndQuery;
 use tokio::time;
-use tonic::Status;
 use tonic::client::Grpc;
 use tonic::codec::ProstCodec;
 use tonic::transport::{ClientTlsConfig, Endpoint};
@@ -19,6 +18,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
+use xlinerpc::Status;
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -101,14 +101,10 @@ impl LeaseServer {
                         let s = Arc::clone(&lease_server);
                         let token_option = lease_server.auth_storage.root_token();
                         async move {
-                            let mut request = tonic::Request::new(LeaseRevokeRequest { id });
+                            let mut request =
+                                xlinerpc::Request::from_data(LeaseRevokeRequest { id });
                             if let Ok(token) = token_option {
-                                let _ignore = request.metadata_mut().insert(
-                                    "token",
-                                    token.parse().unwrap_or_else(|e| {
-                                        panic!("metadata value parse error: {e}")
-                                    }),
-                                );
+                                request.metadata_mut().insert("token", token);
                             }
                             if let Err(e) = s.lease_revoke(request).await {
                                 warn!("Failed to revoke expired leases: {}", e);
@@ -123,12 +119,14 @@ impl LeaseServer {
     /// Propose request and get result with fast/slow path
     async fn propose<T>(
         &self,
-        request: tonic::Request<T>,
+        request: xlinerpc::Request<T>,
     ) -> Result<(CommandResponse, Option<SyncResponse>), Status>
     where
         T: Into<RequestWrapper>,
     {
-        let auth_info = self.auth_storage.try_get_auth_info_from_request(&request)?;
+        let auth_info = self
+            .auth_storage
+            .try_get_auth_info_from_rpc_request(&request)?;
         let request = request.into_inner().into();
         let cmd = Command::new_with_auth_info(request, auth_info);
         let res = self.client.propose(&cmd, None, false).await??;
@@ -146,7 +144,7 @@ impl LeaseServer {
         &self,
         request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
     ) -> Result<KeepAliveStream, Status> {
-        self.leader_keep_alive_stream(request_stream)
+        self.leader_keep_alive_stream(request_stream.map(|r| r.map_err(Status::from)))
     }
 
     /// Handle keep alive at leader from an arbitrary request stream source.
@@ -217,8 +215,11 @@ impl LeaseServer {
         request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
-        self.follower_keep_alive_stream(request_stream, leader_addrs)
-            .await
+        self.follower_keep_alive_stream(
+            request_stream.map(|r| r.map_err(Status::from)),
+            leader_addrs,
+        )
+        .await
     }
 
     /// Handle keep alive at follower from an arbitrary request stream source.
@@ -266,7 +267,8 @@ impl LeaseServer {
                 ProstCodec::default(),
             )
             .await?
-            .into_inner();
+            .into_inner()
+            .map(|r| r.map_err(Status::from));
 
         Ok(Box::pin(stream))
     }
@@ -303,8 +305,8 @@ impl LeaseServer {
     /// deleted if the lease expires. Each expired key generates a delete event in the event history.
     async fn lease_grant(
         &self,
-        mut request: tonic::Request<LeaseGrantRequest>,
-    ) -> Result<tonic::Response<LeaseGrantResponse>, Status> {
+        mut request: xlinerpc::Request<LeaseGrantRequest>,
+    ) -> Result<xlinerpc::Response<LeaseGrantResponse>, Status> {
         debug!("Receive LeaseGrantRequest {:?}", request);
         let lease_grant_req = request.get_mut();
         if lease_grant_req.id == 0 {
@@ -321,14 +323,14 @@ impl LeaseServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// `LeaseRevoke` revokes a lease. All keys attached to the lease will expire and be deleted.
     pub(crate) async fn lease_revoke(
         &self,
-        request: tonic::Request<LeaseRevokeRequest>,
-    ) -> Result<tonic::Response<LeaseRevokeResponse>, Status> {
+        request: xlinerpc::Request<LeaseRevokeRequest>,
+    ) -> Result<xlinerpc::Response<LeaseRevokeResponse>, Status> {
         debug!("Receive LeaseRevokeRequest {:?}", request);
 
         let (res, sync_res) = self.propose(request).await?;
@@ -342,28 +344,32 @@ impl LeaseServer {
             }
             metrics::get().lease_expired_total.add(1, &[]);
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 
     /// `LeaseKeepAlive` keeps the lease alive by streaming keep alive requests from the client
     /// to the server and streaming keep alive responses from the server to the client.
     async fn lease_keep_alive(
         &self,
-        request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
+        request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
     ) -> Result<
-        tonic::Response<Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>>,
+        xlinerpc::Response<
+            Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>,
+        >,
         Status,
     > {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let stream = self.lease_keep_alive_stream(request.into_inner()).await?;
-        Ok(tonic::Response::new(stream))
+        let stream = self
+            .lease_keep_alive_stream(request.into_inner().map(|r| r.map_err(Status::from)))
+            .await?;
+        Ok(xlinerpc::Response::from_data(stream))
     }
 
     /// `LeaseTimeToLive` retrieves lease information.
     pub(crate) async fn lease_time_to_live(
         &self,
-        request: tonic::Request<LeaseTimeToLiveRequest>,
-    ) -> Result<tonic::Response<LeaseTimeToLiveResponse>, Status> {
+        request: xlinerpc::Request<LeaseTimeToLiveRequest>,
+    ) -> Result<xlinerpc::Response<LeaseTimeToLiveResponse>, Status> {
         debug!("Receive LeaseTimeToLiveRequest {:?}", request);
         loop {
             if self.lease_storage.is_primary() {
@@ -387,7 +393,7 @@ impl LeaseServer {
                     granted_ttl: lease.ttl().as_secs().numeric_cast(),
                     keys,
                 };
-                return Ok(tonic::Response::new(res));
+                return Ok(xlinerpc::Response::from_data(res));
             }
             let leader_id = self.client.fetch_leader_id(false).await?;
             let leader_addrs = self.cluster_info.client_urls(leader_id).unwrap_or_else(|| {
@@ -401,7 +407,14 @@ impl LeaseServer {
                 let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
                 let mut grpc = Grpc::new(channel);
                 let path = PathAndQuery::from_static("/etcdserverpb.Lease/LeaseTimeToLive");
-                return grpc.unary(request, path, ProstCodec::default()).await;
+                let tonic_res = grpc
+                    .unary(
+                        tonic::Request::new(request.into_inner()),
+                        path,
+                        ProstCodec::default(),
+                    )
+                    .await?;
+                return Ok(xlinerpc::Response::from_data(tonic_res.into_inner()));
             }
         }
     }
@@ -409,8 +422,8 @@ impl LeaseServer {
     /// `LeaseLeases` lists all existing leases.
     async fn lease_leases(
         &self,
-        request: tonic::Request<LeaseLeasesRequest>,
-    ) -> Result<tonic::Response<LeaseLeasesResponse>, Status> {
+        request: xlinerpc::Request<LeaseLeasesRequest>,
+    ) -> Result<xlinerpc::Response<LeaseLeasesResponse>, Status> {
         debug!("Receive LeaseLeasesRequest {:?}", request);
 
         let (res, sync_res) = self.propose(request).await?;
@@ -423,7 +436,7 @@ impl LeaseServer {
                 header.revision = revision;
             }
         }
-        Ok(tonic::Response::new(res))
+        Ok(xlinerpc::Response::from_data(res))
     }
 }
 
@@ -460,31 +473,31 @@ impl Server {
         RouterEndpoint::new(self.lease_server)
             .add_unary_fn(
                 "/LeaseGrant",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseGrantRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseGrantRequest>| async move {
                     this.lease_grant(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseRevoke",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseRevokeRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseRevokeRequest>| async move {
                     this.lease_revoke(request).await
                 },
             )
             .add_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<LeaseServer>, request: tonic::Request<tonic::Streaming<LeaseKeepAliveRequest>>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveRequest>>| async move {
                     this.lease_keep_alive(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseTimeToLive",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseTimeToLiveRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseTimeToLiveRequest>| async move {
                     this.lease_time_to_live(request).await
                 },
             )
             .add_unary_fn(
                 "/LeaseLeases",
-                move |this: Arc<LeaseServer>, request: tonic::Request<LeaseLeasesRequest>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<LeaseLeasesRequest>| async move {
                     this.lease_leases(request).await
                 },
             )
