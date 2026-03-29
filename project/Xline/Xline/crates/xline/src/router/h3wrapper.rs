@@ -156,9 +156,27 @@ fn grpc_ok_response(body: axum::body::Body) -> http::Response<axum::body::Body> 
     response
 }
 
-fn grpc_http_error_response(msg: impl Into<String>) -> http::Response<axum::body::Body> {
-    let mut response = http::Response::new(axum::body::Body::from(msg.into()));
-    *response.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
+fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> {
+    let mut response = http::Response::new(axum::body::Body::empty());
+    let headers = response.headers_mut();
+    let _ = headers.insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("application/grpc+proto"),
+    );
+
+    let grpc_code = i32::from(status.code()).to_string();
+    let grpc_status = http::HeaderValue::from_str(&grpc_code)
+        .unwrap_or_else(|_| http::HeaderValue::from_static("2"));
+    let _ = headers.insert(http::header::HeaderName::from_static("grpc-status"), grpc_status);
+
+    let grpc_message = http::HeaderValue::from_str(status.message())
+        .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
+    let _ = headers.insert(
+        http::header::HeaderName::from_static("grpc-message"),
+        grpc_message,
+    );
+
+    *response.status_mut() = http::StatusCode::OK;
     response
 }
 
@@ -228,6 +246,73 @@ where
     }
 
     Ok(bytes)
+}
+
+fn spawn_grpc_request_stream<B, M>(body: B) -> XlineStreaming<M>
+where
+    B: http_body::Body<Data = Bytes> + Send + 'static,
+    B::Error: Into<crate::router::Error> + Send + 'static,
+    M: Message + Default + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<M, XlineStatus>>(128);
+
+    let _ = tokio::spawn(async move {
+        let mut body = std::pin::pin!(body);
+        let mut buf = Vec::new();
+
+        while let Some(frame) = futures::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await {
+            let frame = match frame {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(XlineStatus::internal(e.into().to_string())))
+                        .await;
+                    return;
+                }
+            };
+
+            if let Ok(data) = frame.into_data() {
+                buf.extend_from_slice(data.as_ref());
+
+                loop {
+                    if buf.len() < GRPC_HEADER_SIZE {
+                        break;
+                    }
+
+                    let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+                    let total = GRPC_HEADER_SIZE + len;
+                    if buf.len() < total {
+                        break;
+                    }
+
+                    let decoded = grpc_frame_decode::<M>(&buf[..total]);
+                    let _ = buf.drain(..total);
+
+                    match decoded {
+                        Ok((msg, _)) => {
+                            if tx.send(Ok(msg)).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Err(e)).await;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !buf.is_empty() {
+            let _ = tx
+                .send(Err(XlineStatus::internal(
+                    "incomplete gRPC frame at end of request stream",
+                )))
+                .await;
+        }
+    });
+
+    XlineStreaming::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx)))
 }
 
 #[derive(Clone)]
@@ -311,19 +396,19 @@ where
 
             let req_bytes = match read_body_bytes(body).await {
                 Ok(b) => b,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => return Ok(grpc_error_response(e)),
             };
 
             let mut reqs = match decode_all_grpc_frames::<Input>(&req_bytes) {
                 Ok(v) => v,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => return Ok(grpc_error_response(e)),
             };
 
             if reqs.len() != 1 {
-                return Ok(grpc_http_error_response(format!(
+                return Ok(grpc_error_response(XlineStatus::invalid_argument(format!(
                     "unary request expects exactly 1 frame, got {}",
                     reqs.len()
-                )));
+                ))));
             }
 
             let rpc_req = XlineRequest::new(reqs.remove(0), meta);
@@ -332,7 +417,7 @@ where
                     let framed = grpc_frame_encode(resp.data());
                     Ok(grpc_ok_response(axum::body::Body::from(framed)))
                 }
-                Err(e) => Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => Ok(grpc_error_response(e)),
             }
         };
         Box::pin(fut)
@@ -397,20 +482,7 @@ where
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);
-
-            let req_bytes = match read_body_bytes(body).await {
-                Ok(b) => b,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
-            };
-
-            let reqs = match decode_all_grpc_frames::<Input>(&req_bytes) {
-                Ok(v) => v,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
-            };
-
-            let input_stream = XlineStreaming::new(Box::pin(tokio_stream::iter(
-                reqs.into_iter().map(Ok::<Input, XlineStatus>),
-            )));
+            let input_stream = spawn_grpc_request_stream::<B, Input>(body);
             let rpc_req = XlineRequest::new(input_stream, meta);
 
             match svc.call(rpc_req).await {
@@ -421,7 +493,7 @@ where
                     });
                     Ok(grpc_ok_response(axum::body::Body::from_stream(out)))
                 }
-                Err(e) => Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => Ok(grpc_error_response(e)),
             }
         };
         Box::pin(fut)
@@ -485,19 +557,19 @@ where
 
             let req_bytes = match read_body_bytes(body).await {
                 Ok(b) => b,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => return Ok(grpc_error_response(e)),
             };
 
             let mut reqs = match decode_all_grpc_frames::<Input>(&req_bytes) {
                 Ok(v) => v,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => return Ok(grpc_error_response(e)),
             };
 
             if reqs.len() != 1 {
-                return Ok(grpc_http_error_response(format!(
+                return Ok(grpc_error_response(XlineStatus::invalid_argument(format!(
                     "server-streaming request expects exactly 1 frame, got {}",
                     reqs.len()
-                )));
+                ))));
             }
 
             let rpc_req = XlineRequest::new(reqs.remove(0), meta);
@@ -509,7 +581,7 @@ where
                     });
                     Ok(grpc_ok_response(axum::body::Body::from_stream(out)))
                 }
-                Err(e) => Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => Ok(grpc_error_response(e)),
             }
         };
         Box::pin(fut)
@@ -573,20 +645,7 @@ where
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);
-
-            let req_bytes = match read_body_bytes(body).await {
-                Ok(b) => b,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
-            };
-
-            let reqs = match decode_all_grpc_frames::<Input>(&req_bytes) {
-                Ok(v) => v,
-                Err(e) => return Ok(grpc_http_error_response(e.to_string())),
-            };
-
-            let input_stream = XlineStreaming::new(Box::pin(tokio_stream::iter(
-                reqs.into_iter().map(Ok::<Input, XlineStatus>),
-            )));
+            let input_stream = spawn_grpc_request_stream::<B, Input>(body);
             let rpc_req = XlineRequest::new(input_stream, meta);
 
             match svc.call(rpc_req).await {
@@ -594,7 +653,7 @@ where
                     let framed = grpc_frame_encode(resp.data());
                     Ok(grpc_ok_response(axum::body::Body::from(framed)))
                 }
-                Err(e) => Ok(grpc_http_error_response(e.to_string())),
+                Err(e) => Ok(grpc_error_response(e)),
             }
         };
         Box::pin(fut)
