@@ -1,6 +1,5 @@
 pub(crate) mod endpoint;
 pub(crate) mod h3wrapper;
-pub(crate) mod makesvc;
 pub(crate) mod server;
 
 pub(crate) type Router = axum::Router;

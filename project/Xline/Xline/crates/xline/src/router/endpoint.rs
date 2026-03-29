@@ -1,8 +1,8 @@
-use crate::router::makesvc::WithEncodingOption;
+use crate::router::h3wrapper::WithEncodingOption;
 
 use super::{
     Router, StateRouter,
-    makesvc::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySVC},
+    h3wrapper::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySVC},
 };
 use prost::Message;
 use tokio_stream::Stream;
