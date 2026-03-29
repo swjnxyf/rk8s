@@ -2,18 +2,14 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 
 use async_stream::{stream, try_stream};
 use clippy_utilities::NumericCast;
-use curp::members::ClusterInfo;
-use futures::{StreamExt, stream::Stream};
-use http::uri::PathAndQuery;
-use tokio::time;
-use tonic::client::Grpc;
-use tonic::codec::ProstCodec;
-use tonic::transport::{ClientTlsConfig, Endpoint};
-use tracing::{debug, warn};
-use utils::{
-    build_endpoint,
-    task_manager::{Listener, TaskManager, tasks::TaskName},
+use curp::{
+    members::ClusterInfo,
+    rpc::{DnsFallback, MethodId, QuicChannel},
 };
+use futures::{StreamExt, stream::Stream};
+use tokio::time;
+use tracing::{debug, warn};
+use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
@@ -48,8 +44,8 @@ pub(crate) struct LeaseServer {
     id_gen: Arc<IdGenerator>,
     /// cluster information
     cluster_info: Arc<ClusterInfo>,
-    /// Client tls config
-    client_tls_config: Option<ClientTlsConfig>,
+    /// Shared QUIC client for direct RPC forwarding
+    quic_client: Arc<gm_quic::prelude::QuicClient>,
     /// Task manager
     task_manager: Arc<TaskManager>,
 }
@@ -65,7 +61,7 @@ impl LeaseServer {
         client: Arc<CurpClient>,
         id_gen: Arc<IdGenerator>,
         cluster_info: Arc<ClusterInfo>,
-        client_tls_config: Option<ClientTlsConfig>,
+        quic_client: Arc<gm_quic::prelude::QuicClient>,
         task_manager: &Arc<TaskManager>,
     ) -> Arc<Self> {
         let lease_server = Arc::new(Self {
@@ -74,7 +70,7 @@ impl LeaseServer {
             client,
             id_gen,
             cluster_info,
-            client_tls_config,
+            quic_client,
             task_manager: Arc::clone(task_manager),
         });
         task_manager.spawn(TaskName::RevokeExpiredLeases, |n| {
@@ -236,8 +232,11 @@ impl LeaseServer {
             .task_manager
             .get_shutdown_listener(TaskName::LeaseKeepAlive)
             .ok_or(Status::cancelled("The cluster is shutting down"))?;
-        let endpoints = build_endpoints(leader_addrs, self.client_tls_config.as_ref())?;
-        let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
+        let channel = QuicChannel::with_addrs(
+            Arc::clone(&self.quic_client),
+            leader_addrs.to_vec(),
+            DnsFallback::Disabled,
+        );
 
         let redirect_stream = stream! {
             loop {
@@ -258,16 +257,14 @@ impl LeaseServer {
 
         };
 
-        let mut grpc = Grpc::new(channel);
-        let path = PathAndQuery::from_static("/etcdserverpb.Lease/LeaseKeepAlive");
-        let stream = grpc
-            .streaming(
-                tonic::Request::new(redirect_stream),
-                path,
-                ProstCodec::default(),
+        let stream = channel
+            .bidirectional_streaming_call::<LeaseKeepAliveRequest, LeaseKeepAliveResponse>(
+                MethodId::XlineLeaseKeepAlive,
+                Box::pin(redirect_stream),
+                Vec::new(),
+                Duration::from_secs(5),
             )
             .await?
-            .into_inner()
             .map(|r| r.map_err(Status::from));
 
         Ok(Box::pin(stream))
@@ -371,9 +368,10 @@ impl LeaseServer {
         request: xlinerpc::Request<LeaseTimeToLiveRequest>,
     ) -> Result<xlinerpc::Response<LeaseTimeToLiveResponse>, Status> {
         debug!("Receive LeaseTimeToLiveRequest {:?}", request);
+        let req = request.into_inner();
         loop {
             if self.lease_storage.is_primary() {
-                let time_to_live_req = request.into_inner();
+                let time_to_live_req = req.clone();
 
                 self.lease_storage.wait_synced(time_to_live_req.id).await;
 
@@ -403,18 +401,20 @@ impl LeaseServer {
                 )
             });
             if !self.lease_storage.is_primary() {
-                let endpoints = build_endpoints(&leader_addrs, self.client_tls_config.as_ref())?;
-                let channel = tonic::transport::Channel::balance_list(endpoints.into_iter());
-                let mut grpc = Grpc::new(channel);
-                let path = PathAndQuery::from_static("/etcdserverpb.Lease/LeaseTimeToLive");
-                let tonic_res = grpc
-                    .unary(
-                        tonic::Request::new(request.into_inner()),
-                        path,
-                        ProstCodec::default(),
+                let channel = QuicChannel::with_addrs(
+                    Arc::clone(&self.quic_client),
+                    leader_addrs.to_vec(),
+                    DnsFallback::Disabled,
+                );
+                let res = channel
+                    .unary_call::<LeaseTimeToLiveRequest, LeaseTimeToLiveResponse>(
+                        MethodId::XlineLeaseTtl,
+                        req.clone(),
+                        Vec::new(),
+                        Duration::from_secs(5),
                     )
                     .await?;
-                return Ok(xlinerpc::Response::from_data(tonic_res.into_inner()));
+                return Ok(xlinerpc::Response::from_data(res));
             }
         }
     }
@@ -438,22 +438,6 @@ impl LeaseServer {
         }
         Ok(xlinerpc::Response::from_data(res))
     }
-}
-
-/// Build endpoints from addresses
-#[allow(clippy::result_large_err)]
-fn build_endpoints(
-    addrs: &[String],
-    tls_config: Option<&ClientTlsConfig>,
-) -> Result<Vec<Endpoint>, Status> {
-    addrs
-        .iter()
-        .map(|addr| {
-            let endpoint =
-                build_endpoint(addr, tls_config).map_err(|e| Status::internal(e.to_string()))?;
-            Ok(endpoint)
-        })
-        .collect()
 }
 
 pub(crate) struct Server {

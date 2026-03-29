@@ -606,7 +606,7 @@ impl XlineServer {
                 Arc::clone(&client),
                 id_gen,
                 Arc::clone(&self.cluster_info),
-                self.client_tls_config.clone(),
+                Arc::clone(&self.quic_client),
                 &self.task_manager,
             ),
             AuthServer::new(Arc::clone(&client), Arc::clone(&auth_storage)),
