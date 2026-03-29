@@ -1,5 +1,3 @@
-use crate::router::h3wrapper::WithEncodingOption;
-
 use super::{
     Router, StateRouter,
     h3wrapper::{MakeClientStreamingSvc, MakeServerStreamingSvc, MakeStreamingSvc, MakeUnarySVC},
@@ -41,10 +39,7 @@ where
         InputScheme: 'static + Clone + Default + Message,
         OutputScheme: 'static + Clone + Default + Message,
     {
-        self.router = self.router.route_service(
-            name,
-            WithEncodingOption::<_>::new(MakeUnarySVC::new(service)),
-        );
+        self.router = self.router.route_service(name, MakeUnarySVC::new(service));
         self
     }
 
@@ -64,9 +59,7 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(WithEncodingOption::<_>::new(MakeUnarySVC::new(
-                handler_service,
-            ))),
+            axum::routing::post_service(MakeUnarySVC::new(handler_service)),
         );
         self
     }
@@ -92,9 +85,7 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(WithEncodingOption::new(MakeStreamingSvc::new(
-                handler_service,
-            ))),
+            axum::routing::post_service(MakeStreamingSvc::new(handler_service)),
         );
         self
     }
@@ -120,9 +111,7 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(WithEncodingOption::new(MakeServerStreamingSvc::new(
-                handler_service,
-            ))),
+            axum::routing::post_service(MakeServerStreamingSvc::new(handler_service)),
         );
         self
     }
@@ -147,9 +136,7 @@ where
 
         self.router = self.router.route_service(
             name,
-            axum::routing::post_service(WithEncodingOption::new(MakeClientStreamingSvc::new(
-                handler_service,
-            ))),
+            axum::routing::post_service(MakeClientStreamingSvc::new(handler_service)),
         );
         self
     }

@@ -7,7 +7,6 @@
 //! See the original repository for more context: <https://github.com/ScuffleCloud/scuffle>
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::{Error, anyhow};
@@ -17,12 +16,13 @@ use h3::server::RequestStream;
 use http::Request;
 use prost::Message;
 use tokio_stream::Stream;
-use tonic::{codec::EnabledCompressionEncodings, codegen::BoxFuture};
 use tower::Service;
 use xlinerpc::{
     MetaData, Request as XlineRequest, Response as XlineResponse, Status as XlineStatus,
     Streaming as XlineStreaming,
 };
+
+type RpcFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
 
 /// An incoming HTTP/3 body.
 ///
@@ -319,31 +319,6 @@ where
 }
 
 #[derive(Clone)]
-pub(crate) struct WithEncodingOption<T> {
-    svc: Arc<T>,
-    accept_compression_encodings: EnabledCompressionEncodings,
-    send_compression_encodings: EnabledCompressionEncodings,
-    max_decoding_message_size: Option<usize>,
-    max_encoding_message_size: Option<usize>,
-}
-
-impl<T> WithEncodingOption<T> {
-    pub(crate) fn new(inner: T) -> Self {
-        Self::from_arc(Arc::new(inner))
-    }
-
-    pub(crate) fn from_arc(inner: Arc<T>) -> Self {
-        Self {
-            svc: inner,
-            accept_compression_encodings: Default::default(),
-            send_compression_encodings: Default::default(),
-            max_decoding_message_size: None,
-            max_encoding_message_size: None,
-        }
-    }
-}
-
-#[derive(Clone)]
 pub(crate) struct MakeUnarySVC<SVC, Input, Output> {
     inner: SVC,
     _1: std::marker::PhantomData<Input>,
@@ -363,8 +338,7 @@ where
     }
 }
 
-impl<B, SVC, Input, Output> Service<Request<B>>
-    for WithEncodingOption<MakeUnarySVC<SVC, Input, Output>>
+impl<B, SVC, Input, Output> Service<Request<B>> for MakeUnarySVC<SVC, Input, Output>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -379,20 +353,14 @@ where
 {
     type Response = http::Response<axum::body::Body>;
     type Error = std::convert::Infallible;
-    type Future = BoxFuture<Self::Response, Self::Error>;
+    type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let mut svc = self.svc.inner.clone();
-        let _encoding = (
-            self.accept_compression_encodings,
-            self.send_compression_encodings,
-            self.max_decoding_message_size,
-            self.max_encoding_message_size,
-        );
+        let mut svc = self.inner.clone();
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);
@@ -447,8 +415,7 @@ where
     }
 }
 
-impl<B, SVC, Input, Output, RspStream> Service<Request<B>>
-    for WithEncodingOption<MakeStreamingSvc<SVC, Input, Output>>
+impl<B, SVC, Input, Output, RspStream> Service<Request<B>> for MakeStreamingSvc<SVC, Input, Output>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -468,20 +435,14 @@ where
 {
     type Response = http::Response<axum::body::Body>;
     type Error = std::convert::Infallible;
-    type Future = BoxFuture<Self::Response, Self::Error>;
+    type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let mut svc = self.svc.inner.clone();
-        let _encoding = (
-            self.accept_compression_encodings,
-            self.send_compression_encodings,
-            self.max_decoding_message_size,
-            self.max_encoding_message_size,
-        );
+        let mut svc = self.inner.clone();
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);
@@ -524,7 +485,7 @@ where
 }
 
 impl<B, SVC, Input, Output, RspStream> Service<Request<B>>
-    for WithEncodingOption<MakeServerStreamingSvc<SVC, Input, Output>>
+    for MakeServerStreamingSvc<SVC, Input, Output>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -540,20 +501,14 @@ where
 {
     type Response = http::Response<axum::body::Body>;
     type Error = std::convert::Infallible;
-    type Future = BoxFuture<Self::Response, Self::Error>;
+    type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let mut svc = self.svc.inner.clone();
-        let _encoding = (
-            self.accept_compression_encodings,
-            self.send_compression_encodings,
-            self.max_decoding_message_size,
-            self.max_encoding_message_size,
-        );
+        let mut svc = self.inner.clone();
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);
@@ -611,8 +566,7 @@ where
     }
 }
 
-impl<B, SVC, Input, Output> Service<Request<B>>
-    for WithEncodingOption<MakeClientStreamingSvc<SVC, Input, Output>>
+impl<B, SVC, Input, Output> Service<Request<B>> for MakeClientStreamingSvc<SVC, Input, Output>
 where
     Input: Message + Default + Send + 'static,
     Output: Message + Default + Send + 'static + Clone,
@@ -631,20 +585,14 @@ where
 {
     type Response = http::Response<axum::body::Body>;
     type Error = std::convert::Infallible;
-    type Future = BoxFuture<Self::Response, Self::Error>;
+    type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let mut svc = self.svc.inner.clone();
-        let _encoding = (
-            self.accept_compression_encodings,
-            self.send_compression_encodings,
-            self.max_decoding_message_size,
-            self.max_encoding_message_size,
-        );
+        let mut svc = self.inner.clone();
         let fut = async move {
             let (parts, body) = request.into_parts();
             let meta = metadata_from_headers(&parts.headers);

@@ -14,11 +14,7 @@ use curp::{
 use dashmap::DashMap;
 use engine::{MemorySnapshotAllocator, RocksSnapshotAllocator, SnapshotAllocator};
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use tonic::{
-    // TODO: use our own status type
-    // use xlinerpc::status::Status;
-    transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig},
-};
+use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
 use tracing::{info, warn};
 
 use utils::{
