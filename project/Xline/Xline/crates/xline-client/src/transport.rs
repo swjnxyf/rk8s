@@ -94,8 +94,29 @@ fn grpc_error_from_headers(headers: &http::HeaderMap) -> Option<Status> {
     let msg = headers
         .get("grpc-message")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
-    Some(Status::new(code.into(), msg.to_string()))
+        .map(decode_grpc_message_header)
+        .unwrap_or_else(|| "unknown".to_string());
+    Some(Status::new(code.into(), msg))
+}
+
+fn decode_grpc_message_header(message: &str) -> String {
+    let bytes = message.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let h1 = bytes[i + 1] as char;
+            let h2 = bytes[i + 2] as char;
+            if let (Some(hi), Some(lo)) = (h1.to_digit(16), h2.to_digit(16)) {
+                out.push(((hi << 4) as u8) | (lo as u8));
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[derive(Clone)]

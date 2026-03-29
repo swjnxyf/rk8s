@@ -29,6 +29,8 @@ use xlinerpc::{Status, Streaming};
 
 /// Default Lease Request Time
 const DEFAULT_LEASE_REQUEST_TIME: Duration = Duration::from_millis(500);
+/// No transport-level deadline for follower forwarding unless caller supplied one.
+const NO_FORWARD_TIMEOUT: Duration = Duration::ZERO;
 
 /// Lease Server
 pub(crate) struct LeaseServer {
@@ -257,7 +259,7 @@ impl LeaseServer {
                 MethodId::XlineLeaseKeepAlive,
                 Box::pin(redirect_stream),
                 Vec::new(),
-                Duration::from_secs(5),
+                NO_FORWARD_TIMEOUT,
             )
             .await?
             .map(|r| r.map_err(Status::from));
@@ -404,7 +406,7 @@ impl LeaseServer {
                         MethodId::XlineLeaseTtl,
                         req.clone(),
                         Vec::new(),
-                        Duration::from_secs(5),
+                        NO_FORWARD_TIMEOUT,
                     )
                     .await?;
                 return Ok(xlinerpc::Response::from_data(res));

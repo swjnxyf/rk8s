@@ -5,6 +5,7 @@
 //! The design patterns (state machine, trailer polling, size hint enforcement) draw from Scuffle's approach.
 //!
 //! See the original repository for more context: <https://github.com/ScuffleCloud/scuffle>
+use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -153,7 +154,83 @@ fn grpc_ok_response(body: axum::body::Body) -> http::Response<axum::body::Body> 
         http::header::CONTENT_TYPE,
         http::HeaderValue::from_static("application/grpc+proto"),
     );
+    let _ = headers.insert(
+        http::header::HeaderName::from_static("grpc-status"),
+        http::HeaderValue::from_static("0"),
+    );
     response
+}
+
+fn grpc_trailers_from_status(status: Option<XlineStatus>) -> http::HeaderMap {
+    let mut trailers = http::HeaderMap::new();
+    let code = status
+        .as_ref()
+        .map(|s| i32::from(s.code()).to_string())
+        .unwrap_or_else(|| "0".to_string());
+    let grpc_status =
+        http::HeaderValue::from_str(&code).unwrap_or_else(|_| http::HeaderValue::from_static("2"));
+    let _ = trailers.insert(
+        http::header::HeaderName::from_static("grpc-status"),
+        grpc_status,
+    );
+
+    if let Some(status) = status {
+        let msg = status.message();
+        if !msg.is_empty() {
+            let encoded = encode_grpc_message_header(msg);
+            let grpc_message = http::HeaderValue::from_str(&encoded)
+                .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
+            let _ = trailers.insert(
+                http::header::HeaderName::from_static("grpc-message"),
+                grpc_message,
+            );
+        }
+    }
+
+    trailers
+}
+
+struct GrpcStreamingBody {
+    inner: Pin<Box<dyn Stream<Item = Result<Bytes, XlineStatus>> + Send>>,
+    finished: bool,
+}
+
+impl GrpcStreamingBody {
+    fn new(inner: Pin<Box<dyn Stream<Item = Result<Bytes, XlineStatus>> + Send>>) -> Self {
+        Self {
+            inner,
+            finished: false,
+        }
+    }
+}
+
+impl http_body::Body for GrpcStreamingBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        if self.finished {
+            return Poll::Ready(None);
+        }
+
+        match self.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(data))) => Poll::Ready(Some(Ok(http_body::Frame::data(data)))),
+            Poll::Ready(Some(Err(status))) => {
+                self.finished = true;
+                let trailers = grpc_trailers_from_status(Some(status));
+                Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))))
+            }
+            Poll::Ready(None) => {
+                self.finished = true;
+                let trailers = grpc_trailers_from_status(None);
+                Poll::Ready(Some(Ok(http_body::Frame::trailers(trailers))))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> {
@@ -172,7 +249,8 @@ fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> 
         grpc_status,
     );
 
-    let grpc_message = http::HeaderValue::from_str(status.message())
+    let encoded_message = encode_grpc_message_header(status.message());
+    let grpc_message = http::HeaderValue::from_str(&encoded_message)
         .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
     let _ = headers.insert(
         http::header::HeaderName::from_static("grpc-message"),
@@ -181,6 +259,19 @@ fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> 
 
     *response.status_mut() = http::StatusCode::OK;
     response
+}
+
+fn encode_grpc_message_header(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    for b in message.bytes() {
+        if (0x20..=0x7e).contains(&b) && b != b'%' {
+            out.push(char::from(b));
+        } else {
+            out.push('%');
+            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{b:02X}"));
+        }
+    }
+    out
 }
 
 fn grpc_frame_encode<M: Message>(msg: &M) -> Bytes {
@@ -262,6 +353,7 @@ where
     let _ = tokio::spawn(async move {
         let mut body = std::pin::pin!(body);
         let mut buf = Vec::new();
+        let mut read_pos = 0usize;
 
         while let Some(frame) = futures::future::poll_fn(|cx| body.as_mut().poll_frame(cx)).await {
             let frame = match frame {
@@ -278,18 +370,25 @@ where
                 buf.extend_from_slice(data.as_ref());
 
                 loop {
-                    if buf.len() < GRPC_HEADER_SIZE {
+                    let available = buf.len().saturating_sub(read_pos);
+                    if available < GRPC_HEADER_SIZE {
                         break;
                     }
 
-                    let len = u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+                    let base = read_pos;
+                    let len = u32::from_be_bytes([
+                        buf[base + 1],
+                        buf[base + 2],
+                        buf[base + 3],
+                        buf[base + 4],
+                    ]) as usize;
                     let total = GRPC_HEADER_SIZE + len;
-                    if buf.len() < total {
+                    if available < total {
                         break;
                     }
 
-                    let decoded = grpc_frame_decode::<M>(&buf[..total]);
-                    let _ = buf.drain(..total);
+                    let decoded = grpc_frame_decode::<M>(&buf[base..base + total]);
+                    read_pos += total;
 
                     match decoded {
                         Ok((msg, _)) => {
@@ -303,10 +402,16 @@ where
                         }
                     }
                 }
+
+                // Periodically compact consumed prefix to bound memory and keep indexing cheap.
+                if read_pos > 0 && (read_pos >= 4096 || read_pos * 2 >= buf.len()) {
+                    let _ = buf.drain(..read_pos);
+                    read_pos = 0;
+                }
             }
         }
 
-        if !buf.is_empty() {
+        if buf.len().saturating_sub(read_pos) != 0 {
             let _ = tx
                 .send(Err(XlineStatus::internal(
                     "incomplete gRPC frame at end of request stream",
@@ -352,7 +457,7 @@ where
     B::Error: Into<crate::router::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
     type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -434,7 +539,7 @@ where
     B::Error: Into<crate::router::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
     type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -451,11 +556,11 @@ where
 
             match svc.call(rpc_req).await {
                 Ok(resp) => {
-                    let out = resp.into_inner().map(|item| {
-                        item.map(|msg| grpc_frame_encode(&msg))
-                            .map_err(|e| std::io::Error::other(e.to_string()))
-                    });
-                    Ok(grpc_ok_response(axum::body::Body::from_stream(out)))
+                    let out = resp
+                        .into_inner()
+                        .map(|item| item.map(|msg| grpc_frame_encode(&msg)));
+                    let body = axum::body::Body::new(GrpcStreamingBody::new(Box::pin(out)));
+                    Ok(grpc_ok_response(body))
                 }
                 Err(e) => Ok(grpc_error_response(e)),
             }
@@ -500,7 +605,7 @@ where
     B::Error: Into<crate::router::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
     type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -533,11 +638,11 @@ where
             let rpc_req = XlineRequest::new(reqs.remove(0), meta);
             match svc.call(rpc_req).await {
                 Ok(resp) => {
-                    let out = resp.into_inner().map(|item| {
-                        item.map(|msg| grpc_frame_encode(&msg))
-                            .map_err(|e| std::io::Error::other(e.to_string()))
-                    });
-                    Ok(grpc_ok_response(axum::body::Body::from_stream(out)))
+                    let out = resp
+                        .into_inner()
+                        .map(|item| item.map(|msg| grpc_frame_encode(&msg)));
+                    let body = axum::body::Body::new(GrpcStreamingBody::new(Box::pin(out)));
+                    Ok(grpc_ok_response(body))
                 }
                 Err(e) => Ok(grpc_error_response(e)),
             }
@@ -584,7 +689,7 @@ where
     B::Error: Into<crate::router::Error> + Send + 'static,
 {
     type Response = http::Response<axum::body::Body>;
-    type Error = std::convert::Infallible;
+    type Error = Infallible;
     type Future = RpcFuture<Self::Response, Self::Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

@@ -11,8 +11,7 @@ use tracing::{debug, warn};
 use utils::task_manager::{Listener, TaskManager, tasks::TaskName};
 use xlineapi::command::KeyRange;
 use xlinerpc::{Status, Streaming};
-// TODO: use our own status type
-// use xlinerpc::status::Status;
+
 use crate::{
     header_gen::HeaderGenerator,
     router::endpoint::EndPoint as RouterEndpoint,

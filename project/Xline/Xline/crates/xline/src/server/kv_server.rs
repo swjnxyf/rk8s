@@ -17,8 +17,6 @@ use xlineapi::{
     request_validation::RequestValidator,
 };
 use xlinerpc::Status;
-// TODO: use our own status type
-// use xlinerpc::status::{Code,Status};
 
 use crate::{
     revision_check::RevisionCheck,

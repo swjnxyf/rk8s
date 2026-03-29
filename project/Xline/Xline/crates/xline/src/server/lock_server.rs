@@ -1,17 +1,5 @@
 use std::sync::Arc;
 
-use clippy_utilities::OverflowArithmetic;
-use tokio::time::{Duration, sleep};
-use tonic::transport::ClientTlsConfig;
-use tracing::debug;
-use xlineapi::{
-    AuthInfo,
-    command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
-    execute_error::ExecuteError,
-};
-use xlinerpc::Status;
-// TODO: use our own status type
-// use xlinerpc::status::Status;
 use crate::{
     id_gen::IdGenerator,
     router::endpoint::EndPoint as RouterEndpoint,
@@ -23,9 +11,23 @@ use crate::{
     },
     storage::AuthStore,
 };
+use clippy_utilities::OverflowArithmetic;
+use tokio::time::{Duration, sleep};
+use tonic::transport::ClientTlsConfig;
+use tracing::debug;
+use xlineapi::{
+    AuthInfo,
+    command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
+    execute_error::ExecuteError,
+};
+use xlinerpc::Status;
 
 /// Default session ttl
 const DEFAULT_SESSION_TTL: i64 = 60;
+/// Initial polling interval while waiting for predecessor lock deletion
+const WAIT_DELETE_INITIAL_INTERVAL: Duration = Duration::from_millis(50);
+/// Max polling interval while waiting for predecessor lock deletion
+const WAIT_DELETE_MAX_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Lock Server
 pub(super) struct LockServer {
@@ -120,6 +122,7 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
+        let mut interval = WAIT_DELETE_INITIAL_INTERVAL;
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -149,7 +152,8 @@ impl LockServer {
                 return Ok(());
             }
 
-            sleep(Duration::from_millis(50)).await;
+            sleep(interval).await;
+            interval = interval.saturating_mul(2).min(WAIT_DELETE_MAX_INTERVAL);
         }
     }
 
