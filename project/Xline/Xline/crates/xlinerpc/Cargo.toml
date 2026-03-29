@@ -8,10 +8,6 @@ bytes = { workspace = true }
 futures = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
-tonic = { workspace = true, optional = true }
-
-[features]
-tonic-compat = ["tonic"]
 
 [lints]
 workspace = true

@@ -4839,7 +4839,6 @@ dependencies = [
  "futures",
  "prost",
  "thiserror 1.0.69",
- "tonic",
 ]
 
 [[package]]
