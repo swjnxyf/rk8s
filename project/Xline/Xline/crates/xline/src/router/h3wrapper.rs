@@ -167,7 +167,10 @@ fn grpc_error_response(status: XlineStatus) -> http::Response<axum::body::Body> 
     let grpc_code = i32::from(status.code()).to_string();
     let grpc_status = http::HeaderValue::from_str(&grpc_code)
         .unwrap_or_else(|_| http::HeaderValue::from_static("2"));
-    let _ = headers.insert(http::header::HeaderName::from_static("grpc-status"), grpc_status);
+    let _ = headers.insert(
+        http::header::HeaderName::from_static("grpc-status"),
+        grpc_status,
+    );
 
     let grpc_message = http::HeaderValue::from_str(status.message())
         .unwrap_or_else(|_| http::HeaderValue::from_static("rpc error"));
