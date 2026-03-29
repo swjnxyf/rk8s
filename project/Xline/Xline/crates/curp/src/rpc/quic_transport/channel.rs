@@ -446,6 +446,48 @@ impl QuicChannel {
         result.map_err(|_| CurpError::RpcTransport(()))?
     }
 
+    /// Perform a bidirectional-streaming RPC call.
+    pub async fn bidirectional_streaming_call<Req, Resp>(
+        &self,
+        method: MethodId,
+        stream: Pin<Box<dyn Stream<Item = Req> + Send>>,
+        meta: Vec<(String, String)>,
+        timeout: Duration,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<Resp, CurpError>> + Send>>, CurpError>
+    where
+        Req: Message + Send + 'static,
+        Resp: Message + Default + Send + Unpin + 'static,
+    {
+        use futures::StreamExt;
+
+        let conn = self.get_connection().await?;
+
+        let (recv_stream, send_stream): (StreamReader, StreamWriter) =
+            tokio::time::timeout(timeout, Self::open_bi_stream(&conn))
+                .await
+                .map_err(|_| CurpError::RpcTransport(()))??;
+
+        let mut writer = FrameWriter::new(send_stream);
+        writer.write_request_header(method, &meta).await?;
+
+        let _send_task = tokio::spawn(async move {
+            let mut stream = stream;
+            while let Some(req) = stream.next().await {
+                let req_bytes = req.encode_to_vec();
+                if writer.write_frame(&Frame::Data(req_bytes)).await.is_err() {
+                    return;
+                }
+            }
+            let _ = writer.write_frame(&Frame::End).await;
+            let _ = writer.flush().await;
+            let mut send_stream: StreamWriter = writer.into_inner();
+            let _ = send_stream.shutdown().await;
+        });
+
+        let reader = FrameReader::new_server_streaming(recv_stream);
+        Ok(Box::pin(ServerStreamingResponse::<Resp>::new(reader, conn)))
+    }
+
     /// Connect to a single address (for discovery)
     pub async fn connect_single(addr: &str, client: Arc<QuicClient>) -> Result<Self, CurpError> {
         let channel = Self::new(client);
