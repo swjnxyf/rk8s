@@ -274,14 +274,15 @@ fn encode_grpc_message_header(message: &str) -> String {
     out
 }
 
-fn grpc_frame_encode<M: Message>(msg: &M) -> Bytes {
+fn grpc_frame_encode<M: Message>(msg: &M) -> Result<Bytes, XlineStatus> {
     let body = msg.encode_to_vec();
-    let len = body.len() as u32;
+    let len = u32::try_from(body.len())
+        .map_err(|_| XlineStatus::internal("gRPC message too large"))?;
     let mut out = Vec::with_capacity(GRPC_HEADER_SIZE + body.len());
     out.push(0); // uncompressed
     out.extend_from_slice(&len.to_be_bytes());
     out.extend_from_slice(&body);
-    Bytes::from(out)
+    Ok(Bytes::from(out))
 }
 
 fn grpc_frame_decode<M: Message + Default>(buf: &[u8]) -> Result<(M, usize), XlineStatus> {
