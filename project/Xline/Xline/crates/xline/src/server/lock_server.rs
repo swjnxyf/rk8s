@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use async_stream::stream;
 use clippy_utilities::OverflowArithmetic;
-use http::uri::PathAndQuery;
-use tonic::client::Grpc;
-use tonic::codec::ProstCodec;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use tokio::time::{Duration, sleep};
+use tonic::transport::ClientTlsConfig;
 use tracing::debug;
-use utils::build_endpoint;
 use xlineapi::{
-    AuthInfo, EventType,
+    AuthInfo,
     command::{Command, CommandResponse, CurpClient, KeyRange, SyncResponse},
     execute_error::ExecuteError,
 };
@@ -22,9 +18,8 @@ use crate::{
     rpc::{
         Compare, CompareResult, CompareTarget, DeleteRangeRequest, DeleteRangeResponse,
         LeaseGrantRequest, LeaseGrantResponse, LockRequest, LockResponse, PutRequest, RangeRequest,
-        RangeResponse, Request, RequestOp, RequestUnion, RequestWrapper, Response, ResponseHeader,
-        SortOrder, SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
-        WatchCreateRequest, WatchRequest,
+        RangeResponse, Request, RequestOp, RequestWrapper, Response, ResponseHeader, SortOrder,
+        SortTarget, TargetUnion, TxnRequest, TxnResponse, UnlockRequest, UnlockResponse,
     },
     storage::AuthStore,
 };
@@ -40,8 +35,6 @@ pub(super) struct LockServer {
     auth_store: Arc<AuthStore>,
     /// Id Generator
     id_gen: Arc<IdGenerator>,
-    /// Server addresses
-    addrs: Vec<Endpoint>,
 }
 
 impl LockServer {
@@ -50,21 +43,13 @@ impl LockServer {
         client: Arc<CurpClient>,
         auth_store: Arc<AuthStore>,
         id_gen: Arc<IdGenerator>,
-        addrs: &[String],
-        client_tls_config: Option<&ClientTlsConfig>,
+        _addrs: &[String],
+        _client_tls_config: Option<&ClientTlsConfig>,
     ) -> Self {
-        let addrs = addrs
-            .iter()
-            .map(|addr| {
-                build_endpoint(addr, client_tls_config)
-                    .unwrap_or_else(|_e| panic!("invalid address: {addr}"))
-            })
-            .collect();
         Self {
             client,
             auth_store,
             id_gen,
-            addrs,
         }
     }
 
@@ -135,9 +120,6 @@ impl LockServer {
         auth_info: Option<&AuthInfo>,
     ) -> Result<(), Status> {
         let rev = my_rev.overflow_sub(1);
-        let channel = Channel::balance_list(self.addrs.clone().into_iter());
-        let mut grpc = Grpc::new(channel);
-        let path = PathAndQuery::from_static("/etcdserverpb.Watch/Watch");
         loop {
             let range_end = KeyRange::get_prefix(&pfx);
             #[allow(clippy::as_conversions)] // this cast is always safe
@@ -156,32 +138,18 @@ impl LockServer {
                 Some(kv) => kv.key.clone(),
                 None => return Ok(()),
             };
-            let request_stream = stream! {
-                yield WatchRequest {
-                    request_union: Some(RequestUnion::CreateRequest(WatchCreateRequest {
-                        key: last_key,
-                        ..Default::default()
-                    })),
-                };
+
+            let check_req = RangeRequest {
+                key: last_key,
+                ..Default::default()
             };
-            let mut response_stream: tonic::Streaming<crate::rpc::WatchResponse> = grpc
-                .streaming(
-                    tonic::Request::new(request_stream),
-                    path.clone(),
-                    ProstCodec::default(),
-                )
-                .await?
-                .into_inner();
-            while let Some(watch_res) = response_stream.message().await? {
-                #[allow(clippy::as_conversions)] // this cast is always safe
-                if watch_res
-                    .events
-                    .iter()
-                    .any(|e| e.r#type == EventType::Delete as i32)
-                {
-                    break;
-                }
+            let (check_res, _sync_res) = self.propose(check_req, auth_info.cloned()).await?;
+            let check = Into::<RangeResponse>::into(check_res.into_inner());
+            if check.kvs.is_empty() {
+                return Ok(());
             }
+
+            sleep(Duration::from_millis(50)).await;
         }
     }
 
