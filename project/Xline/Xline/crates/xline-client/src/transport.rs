@@ -18,6 +18,7 @@ use tokio::sync::RwLock;
 use xlinerpc::status::Status;
 
 pub(crate) use curp::rpc::MethodId;
+pub use xlinerpc::Streaming;
 
 use crate::error::{h3_stream_error_to_status, http_status_to_result};
 use crate::h3_pool::H3ConnectionPool;
@@ -571,33 +572,3 @@ where
     }
 }
 
-/// QUIC-backed response stream used by xline client streaming APIs.
-pub struct Streaming<T> {
-    inner: Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>,
-}
-
-impl<T> std::fmt::Debug for Streaming<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Streaming").finish_non_exhaustive()
-    }
-}
-
-impl<T> Streaming<T> {
-    #[inline]
-    fn new(inner: Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>>) -> Self {
-        Self { inner }
-    }
-
-    /// Receive the next message from the stream.
-    pub async fn message(&mut self) -> Result<Option<T>, Status> {
-        self.inner.next().await.transpose()
-    }
-}
-
-impl<T> Stream for Streaming<T> {
-    type Item = Result<T, Status>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().inner.as_mut().poll_next(cx)
-    }
-}

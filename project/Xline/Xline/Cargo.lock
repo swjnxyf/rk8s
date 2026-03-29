@@ -4836,6 +4836,7 @@ name = "xlinerpc"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
  "prost",
  "thiserror 1.0.69",
  "tonic",
