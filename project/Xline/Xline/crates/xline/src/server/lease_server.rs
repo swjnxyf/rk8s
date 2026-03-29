@@ -14,7 +14,7 @@ use xlineapi::{
     command::{Command, CommandResponse, CurpClient, SyncResponse},
     execute_error::ExecuteError,
 };
-use xlinerpc::Status;
+use xlinerpc::{Status, Streaming};
 // TODO: use our own status type
 // use xlinerpc::status::Status;
 use crate::{
@@ -138,9 +138,9 @@ impl LeaseServer {
     )] // Introduced by tokio::select!
     fn leader_keep_alive(
         &self,
-        request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        request_stream: Streaming<LeaseKeepAliveRequest>,
     ) -> Result<KeepAliveStream, Status> {
-        self.leader_keep_alive_stream(request_stream.map(|r| r.map_err(Status::from)))
+        self.leader_keep_alive_stream(request_stream)
     }
 
     /// Handle keep alive at leader from an arbitrary request stream source.
@@ -208,14 +208,11 @@ impl LeaseServer {
     )] // Introduced by tokio::select!
     async fn follower_keep_alive(
         &self,
-        request_stream: tonic::Streaming<LeaseKeepAliveRequest>,
+        request_stream: Streaming<LeaseKeepAliveRequest>,
         leader_addrs: &[String],
     ) -> Result<KeepAliveStream, Status> {
-        self.follower_keep_alive_stream(
-            request_stream.map(|r| r.map_err(Status::from)),
-            leader_addrs,
-        )
-        .await
+        self.follower_keep_alive_stream(request_stream, leader_addrs)
+            .await
     }
 
     /// Handle keep alive at follower from an arbitrary request stream source.
@@ -348,7 +345,7 @@ impl LeaseServer {
     /// to the server and streaming keep alive responses from the server to the client.
     async fn lease_keep_alive(
         &self,
-        request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveRequest>>,
+        request: xlinerpc::Request<Streaming<LeaseKeepAliveRequest>>,
     ) -> Result<
         xlinerpc::Response<
             Pin<Box<dyn Stream<Item = Result<LeaseKeepAliveResponse, Status>> + Send>>,
@@ -356,9 +353,7 @@ impl LeaseServer {
         Status,
     > {
         debug!("Receive LeaseKeepAliveRequest {:?}", request);
-        let stream = self
-            .lease_keep_alive_stream(request.into_inner().map(|r| r.map_err(Status::from)))
-            .await?;
+        let stream = self.lease_keep_alive_stream(request.into_inner()).await?;
         Ok(xlinerpc::Response::from_data(stream))
     }
 
@@ -469,7 +464,7 @@ impl Server {
             )
             .add_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<LeaseServer>, request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveRequest>>| async move {
+                move |this: Arc<LeaseServer>, request: xlinerpc::Request<Streaming<LeaseKeepAliveRequest>>| async move {
                     this.lease_keep_alive(request).await
                 },
             )

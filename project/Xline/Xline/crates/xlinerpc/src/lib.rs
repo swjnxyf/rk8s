@@ -8,16 +8,16 @@ pub mod codec;
 pub mod envelope;
 pub mod request;
 pub mod response;
-pub mod streaming;
 pub mod status;
+pub mod streaming;
 
 // Re-export commonly used types
 pub use codec::{BinaryCodec, Codec, DecodeError, EncodeError};
 pub use envelope::Envelope;
 pub use request::Request;
 pub use response::Response;
-pub use streaming::Streaming;
 pub use status::{Code, Status};
+pub use streaming::Streaming;
 
 /// Trait for types that can be converted into metadata bytes (keys or values)
 ///

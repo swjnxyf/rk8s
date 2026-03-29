@@ -6,9 +6,8 @@ use super::{
 };
 use prost::Message;
 use tokio_stream::Stream;
-use tonic::codec::Streaming;
 use tower::{Service, service_fn};
-use xlinerpc::{Request, Response, Status};
+use xlinerpc::{Request, Response, Status, Streaming};
 
 #[derive(Debug)]
 pub struct EndPoint<T> {

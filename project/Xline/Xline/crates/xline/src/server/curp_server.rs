@@ -126,7 +126,7 @@ where
             )
             .add_client_streaming_fn(
                 "/LeaseKeepAlive",
-                move |this: Arc<T>, request: xlinerpc::Request<tonic::Streaming<LeaseKeepAliveMsg>>| async move {
+                move |this: Arc<T>, request: xlinerpc::Request<xlinerpc::Streaming<LeaseKeepAliveMsg>>| async move {
                     let stream = request.into_inner();
                     let curp_stream: Box<
                         dyn Stream<Item = Result<LeaseKeepAliveMsg, CurpError>> + Send + Unpin,
