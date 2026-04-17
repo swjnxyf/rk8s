@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use test_macros::abort_on_panic;
 use xline_test_utils::{
-    Client, ClientOptions, Cluster,
+    Cluster,
     types::kv::{
         Compare, CompareResult, DeleteRangeOptions, PutOptions, RangeOptions, Response, SortOrder,
         SortTarget, TxnOp, TxnRequest,
@@ -46,7 +46,7 @@ async fn test_kv_put() -> Result<(), Box<dyn Error>> {
         },
     ];
 
-    let mut cluster = Cluster::new(3).await;
+    let mut cluster = Cluster::new(3).await; // TODO: Change back to 3 for multi-node testing
     cluster.start().await;
     let client = cluster.client().await.kv_client();
 
@@ -209,10 +209,8 @@ async fn test_range_redirect() -> Result<(), Box<dyn Error>> {
     let mut cluster = Cluster::new(3).await;
     cluster.start().await;
 
-    let addr = cluster.get_client_url(1);
-    let kv_client = Client::connect([addr], ClientOptions::default())
-        .await?
-        .kv_client();
+    // Use cluster.client() to get a client with proper DNS mapping configured
+    let kv_client = cluster.client().await.kv_client();
     let _ignore = kv_client.put("foo", "bar", None).await?;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let res = kv_client.range("foo", None).await?;
