@@ -573,7 +573,7 @@ impl XlineServer {
 
         let curp_config = Arc::new(self.cluster_config.curp_config().clone());
 
-        let curp_server = Rpc::new_for_test(
+        let curp_server = Rpc::new(
             Arc::clone(&self.cluster_info),
             *self.cluster_config.is_leader(),
             Arc::clone(&ce),
@@ -590,7 +590,7 @@ impl XlineServer {
 
         let client = Arc::new(
             CurpClientBuilder::new(*self.cluster_config.client_config(), false)
-                .quic_transport_for_test(Arc::clone(&self.quic_client))
+                .quic_transport(Arc::clone(&self.quic_client))
                 .cluster_version(self.cluster_info.cluster_version())
                 .all_members(self.cluster_info.all_members_peer_urls())
                 .bypass(self.cluster_info.self_id(), curp_server.clone())

@@ -1,17 +1,18 @@
 use std::time::Duration;
 
+use tracing::debug;
 use utils::config::ClientConfig;
 use xline_client::{Client, ClientOptions, error::XlineClientBuildError};
 use xline_test_utils::Cluster;
 
 #[inline]
 fn it_debug(msg: impl AsRef<str>) {
-    eprintln!("[xline-it-debug] {}", msg.as_ref());
+    debug!("[xline-it] {}", msg.as_ref());
 }
 
 pub async fn get_cluster_client() -> Result<(Cluster, Client), XlineClientBuildError> {
     it_debug("get_cluster_client begin");
-    let mut cluster = Cluster::new(1).await;
+    let mut cluster = Cluster::new(3).await;
     it_debug(format!(
         "cluster created, client addrs={:?}",
         cluster.all_client_addrs()

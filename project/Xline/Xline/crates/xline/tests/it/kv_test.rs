@@ -46,7 +46,7 @@ async fn test_kv_put() -> Result<(), Box<dyn Error>> {
         },
     ];
 
-    let mut cluster = Cluster::new(3).await; // TODO: Change back to 3 for multi-node testing
+    let mut cluster = Cluster::new(3).await;
     cluster.start().await;
     let client = cluster.client().await.kv_client();
 

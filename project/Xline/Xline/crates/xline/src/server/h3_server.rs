@@ -12,7 +12,7 @@ use gm_quic::prelude::{EndpointAddr, QuicListeners};
 use h3::quic::{BidiStream, SendStream};
 use h3::server::RequestStream;
 use http::{Request, Response};
-use tower::Service;
+use tower::{Service, ServiceExt};
 use tracing::{debug, error, info, trace, warn};
 use xlineapi::command::{Command, CurpClient};
 
@@ -72,7 +72,7 @@ struct SharedQuicState {
 }
 
 /// Routing info for a single server instance
-#[allow(dead_code)] // tls_config暂时未使用，但可能将来需要
+#[allow(dead_code)] // tls_config is unused but may be needed in the future
 struct ServerRoutingInfo {
     client_ports: HashSet<u16>,
     peer_ports: HashSet<u16>,
@@ -458,7 +458,7 @@ impl XlineH3Server {
                     });
                 }
                 Ok(None) => {
-                    error!("failed to accept a connection");
+                    trace!("connection accepted, no pending requests");
                     break;
                 }
                 Err(e) => {
@@ -514,6 +514,12 @@ where
             .get(http::header::CONTENT_LENGTH)
             .and_then(|len| len.to_str().ok().and_then(|x| x.parse().ok())),
     );
+    // Wait for the service to be ready before processing the request
+    // This is required by the Tower Service contract
+    let _ = service.ready().await.map_err(|e| {
+        error!("service not ready: {}", e);
+        anyhow::anyhow!("service not ready: {}", e)
+    })?;
     let (parts, _) = request.into_parts();
     let resp = service.call(Request::from_parts(parts, body)).await?;
     let (parts, body) = resp.into_parts();

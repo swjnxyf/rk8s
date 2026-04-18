@@ -13,7 +13,6 @@ use gm_quic::prelude::{Connection as GmConnection, QuicClient};
 use h3::client::RequestStream;
 use h3_shim::BidiStream;
 use prost::Message;
-use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, warn};
@@ -148,12 +147,14 @@ impl H3Channel {
         // ServerName::try_from("host:port") to fail. By using connected_to() with
         // just the hostname as server_name, we ensure a valid SNI is sent.
         let (server_name, socket_addr) =
-            self.parse_endpoint_for_quic(endpoint_str).map_err(|e| {
-                Status::internal(format!(
-                    "failed to parse QUIC endpoint '{}': {e}",
-                    endpoint_str
-                ))
-            })?;
+            self.parse_endpoint_for_quic(endpoint_str)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!(
+                        "failed to parse QUIC endpoint '{}': {e}",
+                        endpoint_str
+                    ))
+                })?;
 
         it_debug(format!(
             "quic connect: endpoint={}, server_name={}, addr={}",
@@ -640,7 +641,10 @@ impl H3Channel {
     /// If the hostname is an IP address, it is used for both SNI and the SocketAddr.
     ///
     /// Uses the system DNS resolver for hostname resolution.
-    fn parse_endpoint_for_quic(&self, endpoint: &str) -> Result<(String, SocketAddr), String> {
+    async fn parse_endpoint_for_quic(
+        &self,
+        endpoint: &str,
+    ) -> Result<(String, SocketAddr), String> {
         // Strip bracket notation for IPv6: [::1]:port
         let (host, port) = if endpoint.starts_with('[') {
             let bracket_end = endpoint
@@ -672,16 +676,14 @@ impl H3Channel {
             return Ok((host, addr));
         }
 
-        // Use system DNS resolver
-        let addr = tokio::task::block_in_place(|| {
-            Handle::current().block_on(async {
-                tokio::net::lookup_host((&*host, port))
-                    .await
-                    .map_err(|e| format!("DNS lookup failed for '{host}:{port}': {e}"))
-            })
-        })?
-        .next()
-        .ok_or_else(|| format!("DNS lookup returned no addresses for '{host}:{port}'"))?;
+        // Use system DNS resolver (async)
+        let host_str = host.clone();
+        let mut addrs = tokio::net::lookup_host((host_str.as_str(), port))
+            .await
+            .map_err(|e| format!("DNS lookup failed for '{host_str}:{port}': {e}"))?;
+        let addr = addrs
+            .next()
+            .ok_or_else(|| format!("DNS lookup returned no addresses for '{host_str}:{port}'"))?;
 
         // server_name is the DNS hostname (without port) — this WILL be sent as SNI
         Ok((host, addr))
